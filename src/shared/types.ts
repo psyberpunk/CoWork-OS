@@ -1258,6 +1258,7 @@ export const IPC_CHANNELS = {
   VOICE_GET_ELEVENLABS_VOICES: 'voice:getElevenLabsVoices',
   VOICE_TEST_ELEVENLABS: 'voice:testElevenLabs',
   VOICE_TEST_OPENAI: 'voice:testOpenAI',
+  VOICE_TEST_AZURE: 'voice:testAzure',
   VOICE_EVENT: 'voice:event',
 } as const;
 
@@ -3061,7 +3062,7 @@ export const ANALOGY_DOMAINS: Record<AnalogyDomain, { name: string; description:
 /**
  * Voice provider options
  */
-export type VoiceProvider = 'elevenlabs' | 'openai' | 'local';
+export type VoiceProvider = 'elevenlabs' | 'openai' | 'azure' | 'local';
 
 /**
  * Voice input mode - when to listen for voice input
@@ -3092,11 +3093,29 @@ export interface VoiceSettings {
   /** OpenAI API key for voice (if different from main key) */
   openaiApiKey?: string;
 
+  /** Azure OpenAI endpoint URL (e.g., https://your-resource.openai.azure.com) */
+  azureEndpoint?: string;
+
+  /** Azure OpenAI API key */
+  azureApiKey?: string;
+
+  /** Azure OpenAI TTS deployment name */
+  azureTtsDeploymentName?: string;
+
+  /** Azure OpenAI STT (Whisper) deployment name */
+  azureSttDeploymentName?: string;
+
+  /** Azure OpenAI API version */
+  azureApiVersion?: string;
+
   /** Selected ElevenLabs voice ID */
   elevenLabsVoiceId?: string;
 
   /** Selected OpenAI voice name */
   openaiVoice?: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+
+  /** Selected Azure OpenAI voice name */
+  azureVoice?: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
 
   /** Voice input mode */
   inputMode: VoiceInputMode;

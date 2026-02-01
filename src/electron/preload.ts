@@ -321,6 +321,7 @@ const IPC_CHANNELS = {
   VOICE_GET_ELEVENLABS_VOICES: 'voice:getElevenLabsVoices',
   VOICE_TEST_ELEVENLABS: 'voice:testElevenLabs',
   VOICE_TEST_OPENAI: 'voice:testOpenAI',
+  VOICE_TEST_AZURE: 'voice:testAzure',
   VOICE_EVENT: 'voice:event',
 } as const;
 
@@ -1899,6 +1900,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getElevenLabsVoices: () => ipcRenderer.invoke(IPC_CHANNELS.VOICE_GET_ELEVENLABS_VOICES),
   testElevenLabsConnection: () => ipcRenderer.invoke(IPC_CHANNELS.VOICE_TEST_ELEVENLABS),
   testOpenAIVoiceConnection: () => ipcRenderer.invoke(IPC_CHANNELS.VOICE_TEST_OPENAI),
+  testAzureVoiceConnection: () => ipcRenderer.invoke(IPC_CHANNELS.VOICE_TEST_AZURE),
   onVoiceEvent: (callback: (event: VoiceEventData) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: VoiceEventData) => callback(data);
     ipcRenderer.on(IPC_CHANNELS.VOICE_EVENT, handler);
@@ -2487,12 +2489,13 @@ export interface ElectronAPI {
   getVoiceSettings: () => Promise<VoiceSettingsData>;
   saveVoiceSettings: (settings: Partial<VoiceSettingsData>) => Promise<VoiceSettingsData>;
   getVoiceState: () => Promise<VoiceStateData>;
-  voiceSpeak: (text: string) => Promise<{ success: boolean; error?: string }>;
+  voiceSpeak: (text: string) => Promise<{ success: boolean; audioData?: number[] | null; error?: string }>;
   voiceStopSpeaking: () => Promise<{ success: boolean }>;
   voiceTranscribe: (audioData: ArrayBuffer) => Promise<{ text: string; error?: string }>;
   getElevenLabsVoices: () => Promise<ElevenLabsVoiceData[]>;
   testElevenLabsConnection: () => Promise<{ success: boolean; voiceCount?: number; error?: string }>;
   testOpenAIVoiceConnection: () => Promise<{ success: boolean; error?: string }>;
+  testAzureVoiceConnection: () => Promise<{ success: boolean; error?: string }>;
   onVoiceEvent: (callback: (event: VoiceEventData) => void) => () => void;
 }
 
@@ -2535,7 +2538,7 @@ export interface TunnelStatusData {
 }
 
 // Voice Mode types (inlined for sandboxed preload)
-export type VoiceProvider = 'elevenlabs' | 'openai' | 'local';
+export type VoiceProvider = 'elevenlabs' | 'openai' | 'azure' | 'local';
 export type VoiceInputMode = 'push_to_talk' | 'voice_activity' | 'disabled';
 export type VoiceResponseMode = 'auto' | 'manual' | 'smart';
 
@@ -2547,6 +2550,18 @@ export interface VoiceSettingsData {
   openaiApiKey?: string;
   elevenLabsVoiceId?: string;
   openaiVoice?: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+  /** Azure OpenAI endpoint URL */
+  azureEndpoint?: string;
+  /** Azure OpenAI API key */
+  azureApiKey?: string;
+  /** Azure OpenAI TTS deployment name */
+  azureTtsDeploymentName?: string;
+  /** Azure OpenAI STT deployment name */
+  azureSttDeploymentName?: string;
+  /** Azure OpenAI API version */
+  azureApiVersion?: string;
+  /** Selected Azure voice */
+  azureVoice?: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
   inputMode: VoiceInputMode;
   responseMode: VoiceResponseMode;
   pushToTalkKey: string;

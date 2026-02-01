@@ -11,6 +11,34 @@ import {
   DEFAULT_VOICE_SETTINGS,
 } from '../../shared/types';
 
+// Audio playback helper for renderer process
+async function playAudioData(audioData: number[], volume: number): Promise<void> {
+  const audioContext = new AudioContext();
+  const arrayBuffer = new Uint8Array(audioData).buffer;
+
+  try {
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    const gainNode = audioContext.createGain();
+    gainNode.gain.value = volume / 100;
+    gainNode.connect(audioContext.destination);
+
+    const source = audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(gainNode);
+
+    return new Promise((resolve) => {
+      source.onended = () => {
+        audioContext.close();
+        resolve();
+      };
+      source.start(0);
+    });
+  } catch (error) {
+    audioContext.close();
+    throw error;
+  }
+}
+
 interface VoiceSettingsProps {
   onStateChange?: (state: VoiceState) => void;
 }
@@ -37,6 +65,11 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
   } | null>(null);
   const [testingOpenAI, setTestingOpenAI] = useState(false);
   const [openAITestResult, setOpenAITestResult] = useState<{
+    success: boolean;
+    message: string;
+  } | null>(null);
+  const [testingAzure, setTestingAzure] = useState(false);
+  const [azureTestResult, setAzureTestResult] = useState<{
     success: boolean;
     message: string;
   } | null>(null);
@@ -127,6 +160,28 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
     await saveSettings({ openaiApiKey: apiKey });
   };
 
+  const handleAzureEndpointChange = async (endpoint: string) => {
+    await saveSettings({ azureEndpoint: endpoint });
+  };
+
+  const handleAzureApiKeyChange = async (apiKey: string) => {
+    await saveSettings({ azureApiKey: apiKey });
+  };
+
+  const handleAzureTtsDeploymentChange = async (deploymentName: string) => {
+    await saveSettings({ azureTtsDeploymentName: deploymentName });
+  };
+
+  const handleAzureSttDeploymentChange = async (deploymentName: string) => {
+    await saveSettings({ azureSttDeploymentName: deploymentName });
+  };
+
+  const handleAzureVoiceChange = async (voice: string) => {
+    await saveSettings({
+      azureVoice: voice as 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer',
+    });
+  };
+
   const handleVoiceChange = async (voiceId: string) => {
     if (settings.ttsProvider === 'elevenlabs') {
       await saveSettings({ elevenLabsVoiceId: voiceId });
@@ -197,10 +252,35 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
     }
   };
 
+  const handleTestAzure = async () => {
+    setTestingAzure(true);
+    setAzureTestResult(null);
+    try {
+      const result = await window.electronAPI.testAzureVoiceConnection();
+      setAzureTestResult({
+        success: result.success,
+        message: result.success ? 'Connected!' : result.error || 'Connection failed',
+      });
+    } catch (error: any) {
+      setAzureTestResult({
+        success: false,
+        message: error.message || 'Connection failed',
+      });
+    } finally {
+      setTestingAzure(false);
+    }
+  };
+
   const handleTestSpeech = async () => {
     setTestingSpeech(true);
     try {
-      await window.electronAPI.voiceSpeak('Hello! This is a test of the text to speech system.');
+      const result = await window.electronAPI.voiceSpeak('Hello! This is a test of the text to speech system.');
+      if (result.success && result.audioData) {
+        // Play audio in renderer process
+        await playAudioData(result.audioData, settings.volume);
+      } else if (!result.success) {
+        console.error('Test speech failed:', result.error);
+      }
     } catch (error) {
       console.error('Test speech failed:', error);
     } finally {
@@ -277,6 +357,14 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
             disabled={saving}
           >
             <span className="provider-name">OpenAI</span>
+          </button>
+          <button
+            className={`provider-option ${settings.ttsProvider === 'azure' ? 'selected' : ''}`}
+            onClick={() => handleTTSProviderChange('azure')}
+            disabled={saving}
+          >
+            <span className="provider-name">Azure OpenAI</span>
+            <span className="provider-badge">Enterprise</span>
           </button>
           <button
             className={`provider-option ${settings.ttsProvider === 'local' ? 'selected' : ''}`}
@@ -418,6 +506,119 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
         </div>
       )}
 
+      {/* Azure OpenAI Configuration - show when TTS or STT uses Azure */}
+      {(settings.ttsProvider === 'azure' || settings.sttProvider === 'azure') && (
+        <div className="settings-section">
+          <h4>Azure OpenAI Configuration</h4>
+
+          <div className="settings-field">
+            <label>Endpoint URL</label>
+            <input
+              type="text"
+              className="settings-input"
+              placeholder="https://your-resource.openai.azure.com"
+              value={settings.azureEndpoint || ''}
+              onChange={(e) => handleAzureEndpointChange(e.target.value)}
+            />
+            <p className="settings-hint">
+              Your Azure OpenAI resource endpoint (e.g., https://your-resource.openai.azure.com)
+            </p>
+          </div>
+
+          <div className="settings-field">
+            <label>API Key</label>
+            <div className="input-with-button">
+              <input
+                type="password"
+                className="settings-input"
+                placeholder="Enter your Azure OpenAI API key"
+                value={settings.azureApiKey || ''}
+                onChange={(e) => handleAzureApiKeyChange(e.target.value)}
+              />
+              <button
+                className="button-secondary"
+                onClick={handleTestAzure}
+                disabled={testingAzure || !settings.azureApiKey || !settings.azureEndpoint}
+              >
+                {testingAzure ? 'Testing...' : 'Test'}
+              </button>
+            </div>
+            <p className="settings-hint">
+              Get your API key from the{' '}
+              <a
+                href="https://portal.azure.com"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Azure Portal
+              </a>
+              {' '}under your OpenAI resource → Keys and Endpoint.
+            </p>
+            {azureTestResult && (
+              <div
+                className={`test-result ${azureTestResult.success ? 'success' : 'error'}`}
+              >
+                {azureTestResult.message}
+              </div>
+            )}
+          </div>
+
+          {/* TTS Deployment Name - only show when using Azure for TTS */}
+          {settings.ttsProvider === 'azure' && (
+            <div className="settings-field">
+              <label>TTS Deployment Name</label>
+              <input
+                type="text"
+                className="settings-input"
+                placeholder="e.g., tts-1"
+                value={settings.azureTtsDeploymentName || ''}
+                onChange={(e) => handleAzureTtsDeploymentChange(e.target.value)}
+              />
+              <p className="settings-hint">
+                The deployment name for your TTS model in Azure OpenAI.
+              </p>
+            </div>
+          )}
+
+          {/* STT Deployment Name - only show when using Azure for STT */}
+          {settings.sttProvider === 'azure' && (
+            <div className="settings-field">
+              <label>STT (Whisper) Deployment Name</label>
+              <input
+                type="text"
+                className="settings-input"
+                placeholder="e.g., whisper-1"
+                value={settings.azureSttDeploymentName || ''}
+                onChange={(e) => handleAzureSttDeploymentChange(e.target.value)}
+              />
+              <p className="settings-hint">
+                The deployment name for your Whisper model in Azure OpenAI.
+              </p>
+            </div>
+          )}
+
+          {/* Voice selection - only when using Azure for TTS */}
+          {settings.ttsProvider === 'azure' && (
+            <div className="settings-field">
+              <label>Voice</label>
+              <div className="voice-grid">
+                {OPENAI_VOICES.map((voice) => (
+                  <button
+                    key={voice.id}
+                    className={`voice-option ${settings.azureVoice === voice.id ? 'selected' : ''}`}
+                    onClick={() => handleAzureVoiceChange(voice.id)}
+                    title={voice.description}
+                  >
+                    <span className="voice-name">{voice.name}</span>
+                    <span className="voice-description">{voice.description}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Speech-to-Text Provider */}
       <div className="settings-section">
         <h4>Speech-to-Text Provider</h4>
@@ -430,6 +631,14 @@ export function VoiceSettings({ onStateChange }: VoiceSettingsProps) {
           >
             <span className="provider-name">OpenAI Whisper</span>
             <span className="provider-badge">Recommended</span>
+          </button>
+          <button
+            className={`provider-option ${settings.sttProvider === 'azure' ? 'selected' : ''}`}
+            onClick={() => handleSTTProviderChange('azure')}
+            disabled={saving}
+          >
+            <span className="provider-name">Azure Whisper</span>
+            <span className="provider-badge">Enterprise</span>
           </button>
           <button
             className={`provider-option ${settings.sttProvider === 'local' ? 'selected' : ''}`}

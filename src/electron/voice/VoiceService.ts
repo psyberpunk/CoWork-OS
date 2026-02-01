@@ -114,9 +114,12 @@ export class VoiceService extends EventEmitter {
         case 'openai':
           audioBuffer = await this.openaiTTS(text);
           break;
+        case 'azure':
+          audioBuffer = await this.azureTTS(text);
+          break;
         case 'local':
           // Local TTS requires browser APIs - not available in main process
-          throw new Error('Local TTS is not available in the main process. Please use ElevenLabs or OpenAI.');
+          throw new Error('Local TTS is not available in the main process. Please use ElevenLabs, OpenAI, or Azure.');
         default:
           throw new Error(`Unknown TTS provider: ${this.settings.ttsProvider}`);
       }
@@ -169,15 +172,20 @@ export class VoiceService extends EventEmitter {
         case 'openai':
           transcript = await this.openaiSTT(audioData);
           break;
+        case 'azure':
+          transcript = await this.azureSTT(audioData);
+          break;
         case 'local':
           // Local STT requires browser APIs - not available in main process
-          throw new Error('Local STT is not available in the main process. Please use OpenAI Whisper.');
+          throw new Error('Local STT is not available in the main process. Please use OpenAI Whisper or Azure.');
         case 'elevenlabs':
           // ElevenLabs doesn't have an STT API - redirect to OpenAI if key available
           if (this.settings.openaiApiKey) {
             transcript = await this.openaiSTT(audioData);
+          } else if (this.settings.azureEndpoint && this.settings.azureApiKey) {
+            transcript = await this.azureSTT(audioData);
           } else {
-            throw new Error('ElevenLabs does not provide speech-to-text. Please use OpenAI Whisper or configure an OpenAI API key.');
+            throw new Error('ElevenLabs does not provide speech-to-text. Please use OpenAI Whisper, Azure, or configure an API key.');
           }
           break;
         default:
@@ -251,6 +259,51 @@ export class VoiceService extends EventEmitter {
         },
         body: JSON.stringify({
           model: 'tts-1',
+          input: 'Test',
+          voice: 'alloy',
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        return { success: false, error };
+      }
+
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: (error as Error).message };
+    }
+  }
+
+  /**
+   * Test Azure OpenAI voice connection
+   */
+  async testAzureConnection(): Promise<{ success: boolean; error?: string }> {
+    const endpoint = this.settings.azureEndpoint;
+    const apiKey = this.settings.azureApiKey;
+    const deploymentName = this.settings.azureTtsDeploymentName;
+
+    if (!endpoint) {
+      return { success: false, error: 'Azure OpenAI endpoint not configured' };
+    }
+    if (!apiKey) {
+      return { success: false, error: 'Azure OpenAI API key not configured' };
+    }
+    if (!deploymentName) {
+      return { success: false, error: 'Azure OpenAI TTS deployment name not configured' };
+    }
+
+    try {
+      const apiVersion = this.settings.azureApiVersion || '2024-02-15-preview';
+      const url = `${endpoint}/openai/deployments/${deploymentName}/audio/speech?api-version=${apiVersion}`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'api-key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
           input: 'Test',
           voice: 'alloy',
         }),
@@ -383,6 +436,95 @@ export class VoiceService extends EventEmitter {
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`OpenAI STT failed: ${errorText}`);
+    }
+
+    const data = await response.json() as { text: string };
+    return data.text;
+  }
+
+  /**
+   * Azure OpenAI Text-to-Speech
+   */
+  private async azureTTS(text: string): Promise<ArrayBuffer> {
+    const endpoint = this.settings.azureEndpoint;
+    const apiKey = this.settings.azureApiKey;
+    const deploymentName = this.settings.azureTtsDeploymentName;
+
+    if (!endpoint) {
+      throw new Error('Azure OpenAI endpoint not configured');
+    }
+    if (!apiKey) {
+      throw new Error('Azure OpenAI API key not configured');
+    }
+    if (!deploymentName) {
+      throw new Error('Azure OpenAI TTS deployment name not configured');
+    }
+
+    const voice = this.settings.azureVoice || 'nova';
+    const apiVersion = this.settings.azureApiVersion || '2024-02-15-preview';
+    const url = `${endpoint}/openai/deployments/${deploymentName}/audio/speech?api-version=${apiVersion}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'api-key': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        input: text,
+        voice,
+        speed: this.settings.speechRate,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Azure OpenAI TTS failed: ${errorText}`);
+    }
+
+    return response.arrayBuffer();
+  }
+
+  /**
+   * Azure OpenAI Whisper Speech-to-Text
+   */
+  private async azureSTT(audioData: Buffer): Promise<string> {
+    const endpoint = this.settings.azureEndpoint;
+    const apiKey = this.settings.azureApiKey;
+    const deploymentName = this.settings.azureSttDeploymentName;
+
+    if (!endpoint) {
+      throw new Error('Azure OpenAI endpoint not configured');
+    }
+    if (!apiKey) {
+      throw new Error('Azure OpenAI API key not configured');
+    }
+    if (!deploymentName) {
+      throw new Error('Azure OpenAI STT deployment name not configured');
+    }
+
+    const apiVersion = this.settings.azureApiVersion || '2024-02-15-preview';
+    const url = `${endpoint}/openai/deployments/${deploymentName}/audio/transcriptions?api-version=${apiVersion}`;
+
+    // Create a Blob-like object for Node.js fetch
+    const uint8Array = new Uint8Array(audioData.buffer as ArrayBuffer, audioData.byteOffset, audioData.byteLength);
+    const blob = new Blob([uint8Array], { type: 'audio/webm' });
+
+    const formData = new FormData();
+    formData.append('file', blob, 'audio.webm');
+    formData.append('language', this.settings.language.split('-')[0]);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'api-key': apiKey,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Azure OpenAI STT failed: ${errorText}`);
     }
 
     const data = await response.json() as { text: string };

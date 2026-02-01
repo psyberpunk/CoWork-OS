@@ -6877,6 +6877,7 @@ button {
   flex-direction: column;
   height: 100%;
   background: var(--color-bg-primary);
+  padding-top: 38px; /* Space for title bar buttons */
 }
 
 .settings-page-header {

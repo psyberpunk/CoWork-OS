@@ -3181,6 +3181,17 @@ function setupMemoryHandlers(): void {
     }
   });
 
+  // Test Azure OpenAI voice connection
+  ipcMain.handle(IPC_CHANNELS.VOICE_TEST_AZURE, async () => {
+    try {
+      const voiceService = getVoiceService();
+      return await voiceService.testAzureConnection();
+    } catch (error: any) {
+      console.error('[Voice] Failed to test Azure OpenAI voice:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // Initialize voice service with saved settings
   const savedVoiceSettings = VoiceSettingsManager.loadSettings();
   const voiceService = getVoiceService({ settings: savedVoiceSettings });
