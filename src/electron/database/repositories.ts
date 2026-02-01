@@ -168,7 +168,11 @@ export class TaskRepository {
   private static readonly ALLOWED_UPDATE_FIELDS = new Set([
     'title', 'status', 'error', 'result', 'budgetTokens', 'budgetCost',
     'successCriteria', 'maxAttempts', 'currentAttempt', 'completedAt',
-    'parentTaskId', 'agentType', 'agentConfig', 'depth', 'resultSummary'
+    'parentTaskId', 'agentType', 'agentConfig', 'depth', 'resultSummary',
+    // Agent Squad fields
+    'assignedAgentRoleId', 'boardColumn', 'priority',
+    // Task Board fields
+    'labels', 'dueDate', 'estimatedMinutes', 'actualMinutes', 'mentionedAgentRoleIds'
   ]);
 
   update(id: string, updates: Partial<Task>): void {
@@ -183,8 +187,8 @@ export class TaskRepository {
       }
       const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
       fields.push(`${snakeKey} = ?`);
-      // JSON serialize object fields
-      if ((key === 'successCriteria' || key === 'agentConfig') && value != null) {
+      // JSON serialize object/array fields
+      if ((key === 'successCriteria' || key === 'agentConfig' || key === 'labels' || key === 'mentionedAgentRoleIds') && value != null) {
         values.push(JSON.stringify(value));
       } else {
         values.push(value);
@@ -295,6 +299,16 @@ export class TaskRepository {
       agentConfig: row.agent_config ? safeJsonParse(row.agent_config, undefined, 'task.agentConfig') : undefined,
       depth: row.depth ?? undefined,
       resultSummary: row.result_summary || undefined,
+      // Agent Squad fields
+      assignedAgentRoleId: row.assigned_agent_role_id || undefined,
+      boardColumn: row.board_column || undefined,
+      priority: row.priority ?? undefined,
+      // Task Board fields
+      labels: row.labels ? safeJsonParse<string[]>(row.labels, [], 'task.labels') : undefined,
+      dueDate: row.due_date || undefined,
+      estimatedMinutes: row.estimated_minutes || undefined,
+      actualMinutes: row.actual_minutes || undefined,
+      mentionedAgentRoleIds: row.mentioned_agent_role_ids ? safeJsonParse<string[]>(row.mentioned_agent_role_ids, [], 'task.mentionedAgentRoleIds') : undefined,
     };
   }
 
@@ -309,6 +323,122 @@ export class TaskRepository {
     `);
     const rows = stmt.all(parentTaskId) as any[];
     return rows.map(row => this.mapRowToTask(row));
+  }
+
+  // ============ Task Board Methods ============
+
+  /**
+   * Find tasks by workspace and board column
+   */
+  findByBoardColumn(workspaceId: string, boardColumn: string): Task[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM tasks
+      WHERE workspace_id = ? AND board_column = ?
+      ORDER BY priority DESC, created_at ASC
+    `);
+    const rows = stmt.all(workspaceId, boardColumn) as any[];
+    return rows.map(row => this.mapRowToTask(row));
+  }
+
+  /**
+   * Get tasks grouped by board column for a workspace
+   */
+  getTaskBoard(workspaceId: string): Record<string, Task[]> {
+    const stmt = this.db.prepare(`
+      SELECT * FROM tasks
+      WHERE workspace_id = ? AND parent_task_id IS NULL
+      ORDER BY board_column, priority DESC, created_at ASC
+    `);
+    const rows = stmt.all(workspaceId) as any[];
+    const tasks = rows.map(row => this.mapRowToTask(row));
+
+    // Group tasks by board column
+    const board: Record<string, Task[]> = {
+      backlog: [],
+      todo: [],
+      in_progress: [],
+      review: [],
+      done: [],
+    };
+
+    for (const task of tasks) {
+      const column = task.boardColumn || 'backlog';
+      if (board[column]) {
+        board[column].push(task);
+      } else {
+        board.backlog.push(task);
+      }
+    }
+
+    return board;
+  }
+
+  /**
+   * Move a task to a different board column
+   */
+  moveToColumn(id: string, boardColumn: string): Task | undefined {
+    this.update(id, { boardColumn: boardColumn as any });
+    return this.findById(id);
+  }
+
+  /**
+   * Set task priority
+   */
+  setPriority(id: string, priority: number): Task | undefined {
+    this.update(id, { priority });
+    return this.findById(id);
+  }
+
+  /**
+   * Set task due date
+   */
+  setDueDate(id: string, dueDate: number | null): Task | undefined {
+    this.update(id, { dueDate: dueDate || undefined } as any);
+    return this.findById(id);
+  }
+
+  /**
+   * Set task time estimate
+   */
+  setEstimate(id: string, estimatedMinutes: number | null): Task | undefined {
+    this.update(id, { estimatedMinutes: estimatedMinutes || undefined } as any);
+    return this.findById(id);
+  }
+
+  /**
+   * Add a label to a task
+   */
+  addLabel(id: string, labelId: string): Task | undefined {
+    const task = this.findById(id);
+    if (!task) return undefined;
+
+    const labels = task.labels || [];
+    if (!labels.includes(labelId)) {
+      labels.push(labelId);
+      this.update(id, { labels } as any);
+    }
+    return this.findById(id);
+  }
+
+  /**
+   * Remove a label from a task
+   */
+  removeLabel(id: string, labelId: string): Task | undefined {
+    const task = this.findById(id);
+    if (!task) return undefined;
+
+    const labels = task.labels || [];
+    const newLabels = labels.filter(l => l !== labelId);
+    this.update(id, { labels: newLabels } as any);
+    return this.findById(id);
+  }
+
+  /**
+   * Assign an agent role to a task
+   */
+  assignAgentRole(id: string, agentRoleId: string | null): Task | undefined {
+    this.update(id, { assignedAgentRoleId: agentRoleId || undefined } as any);
+    return this.findById(id);
   }
 }
 

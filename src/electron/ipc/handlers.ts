@@ -23,6 +23,10 @@ import {
   LLMModelRepository,
 } from '../database/repositories';
 import { AgentRoleRepository } from '../agents/AgentRoleRepository';
+import { ActivityRepository } from '../activity/ActivityRepository';
+import { MentionRepository } from '../agents/MentionRepository';
+import { TaskLabelRepository } from '../database/TaskLabelRepository';
+import { WorkingStateRepository } from '../agents/WorkingStateRepository';
 import { IPC_CHANNELS, LLMSettingsData, AddChannelRequest, UpdateChannelRequest, SecurityMode, UpdateInfo, TEMP_WORKSPACE_ID, TEMP_WORKSPACE_NAME, Workspace } from '../../shared/types';
 import * as os from 'os';
 import { AgentDaemon } from '../agent/daemon';
@@ -128,6 +132,10 @@ export async function setupIpcHandlers(
   const skillRepo = new SkillRepository(db);
   const llmModelRepo = new LLMModelRepository(db);
   const agentRoleRepo = new AgentRoleRepository(db);
+  const activityRepo = new ActivityRepository(db);
+  const mentionRepo = new MentionRepository(db);
+  const taskLabelRepo = new TaskLabelRepository(db);
+  const workingStateRepo = new WorkingStateRepository(db);
 
   // Seed default agent roles if none exist
   agentRoleRepo.seedDefaults();
@@ -1633,6 +1641,262 @@ export async function setupIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.AGENT_ROLE_SEED_DEFAULTS, async () => {
     checkRateLimit(IPC_CHANNELS.AGENT_ROLE_SEED_DEFAULTS);
     return agentRoleRepo.seedDefaults();
+  });
+
+  // Activity Feed handlers
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_LIST, async (_, query: any) => {
+    const validated = validateInput(UUIDSchema, query.workspaceId, 'workspace ID');
+    return activityRepo.list({ ...query, workspaceId: validated });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_CREATE, async (_, request: any) => {
+    checkRateLimit(IPC_CHANNELS.ACTIVITY_CREATE);
+    const validatedWorkspaceId = validateInput(UUIDSchema, request.workspaceId, 'workspace ID');
+    const activity = activityRepo.create({ ...request, workspaceId: validatedWorkspaceId });
+    // Emit activity event for real-time updates
+    mainWindow?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'created', activity });
+    return activity;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_MARK_READ, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.ACTIVITY_MARK_READ);
+    const validated = validateInput(UUIDSchema, id, 'activity ID');
+    const success = activityRepo.markRead(validated);
+    if (success) {
+      mainWindow?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'read', id: validated });
+    }
+    return { success };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_MARK_ALL_READ, async (_, workspaceId: string) => {
+    checkRateLimit(IPC_CHANNELS.ACTIVITY_MARK_ALL_READ);
+    const validated = validateInput(UUIDSchema, workspaceId, 'workspace ID');
+    const count = activityRepo.markAllRead(validated);
+    mainWindow?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'all_read', workspaceId: validated });
+    return { count };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_PIN, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.ACTIVITY_PIN);
+    const validated = validateInput(UUIDSchema, id, 'activity ID');
+    const activity = activityRepo.togglePin(validated);
+    if (activity) {
+      mainWindow?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'pinned', activity });
+    }
+    return activity;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ACTIVITY_DELETE, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.ACTIVITY_DELETE);
+    const validated = validateInput(UUIDSchema, id, 'activity ID');
+    const success = activityRepo.delete(validated);
+    if (success) {
+      mainWindow?.webContents.send(IPC_CHANNELS.ACTIVITY_EVENT, { type: 'deleted', id: validated });
+    }
+    return { success };
+  });
+
+  // @Mention handlers
+  ipcMain.handle(IPC_CHANNELS.MENTION_LIST, async (_, query: any) => {
+    return mentionRepo.list(query);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MENTION_CREATE, async (_, request: any) => {
+    checkRateLimit(IPC_CHANNELS.MENTION_CREATE);
+    const validatedWorkspaceId = validateInput(UUIDSchema, request.workspaceId, 'workspace ID');
+    const mention = mentionRepo.create({ ...request, workspaceId: validatedWorkspaceId });
+    // Emit mention event for real-time updates
+    mainWindow?.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'created', mention });
+    // Also create an activity entry for the mention
+    const fromAgent = request.fromAgentRoleId ? agentRoleRepo.findById(request.fromAgentRoleId) : null;
+    const toAgent = agentRoleRepo.findById(request.toAgentRoleId);
+    activityRepo.create({
+      workspaceId: validatedWorkspaceId,
+      taskId: request.taskId,
+      agentRoleId: request.toAgentRoleId,
+      actorType: fromAgent ? 'agent' : 'user',
+      activityType: 'mention',
+      title: `@${toAgent?.displayName || 'Agent'} mentioned`,
+      description: request.context,
+      metadata: { mentionId: mention.id, mentionType: request.mentionType },
+    });
+    return mention;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MENTION_ACKNOWLEDGE, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.MENTION_ACKNOWLEDGE);
+    const validated = validateInput(UUIDSchema, id, 'mention ID');
+    const mention = mentionRepo.acknowledge(validated);
+    if (mention) {
+      mainWindow?.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'acknowledged', mention });
+    }
+    return mention;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MENTION_COMPLETE, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.MENTION_COMPLETE);
+    const validated = validateInput(UUIDSchema, id, 'mention ID');
+    const mention = mentionRepo.complete(validated);
+    if (mention) {
+      mainWindow?.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'completed', mention });
+    }
+    return mention;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MENTION_DISMISS, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.MENTION_DISMISS);
+    const validated = validateInput(UUIDSchema, id, 'mention ID');
+    const mention = mentionRepo.dismiss(validated);
+    if (mention) {
+      mainWindow?.webContents.send(IPC_CHANNELS.MENTION_EVENT, { type: 'dismissed', mention });
+    }
+    return mention;
+  });
+
+  // Task Board handlers
+  ipcMain.handle(IPC_CHANNELS.TASK_MOVE_COLUMN, async (_, taskId: string, column: string) => {
+    checkRateLimit(IPC_CHANNELS.TASK_MOVE_COLUMN);
+    const validatedId = validateInput(UUIDSchema, taskId, 'task ID');
+    const task = taskRepo.moveToColumn(validatedId, column);
+    if (task) {
+      mainWindow?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'moved', task, column });
+    }
+    return task;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_SET_PRIORITY, async (_, taskId: string, priority: number) => {
+    checkRateLimit(IPC_CHANNELS.TASK_SET_PRIORITY);
+    const validatedId = validateInput(UUIDSchema, taskId, 'task ID');
+    const task = taskRepo.setPriority(validatedId, priority);
+    if (task) {
+      mainWindow?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'priority_changed', task });
+    }
+    return task;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_SET_DUE_DATE, async (_, taskId: string, dueDate: number | null) => {
+    checkRateLimit(IPC_CHANNELS.TASK_SET_DUE_DATE);
+    const validatedId = validateInput(UUIDSchema, taskId, 'task ID');
+    const task = taskRepo.setDueDate(validatedId, dueDate);
+    if (task) {
+      mainWindow?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'due_date_changed', task });
+    }
+    return task;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_SET_ESTIMATE, async (_, taskId: string, minutes: number | null) => {
+    checkRateLimit(IPC_CHANNELS.TASK_SET_ESTIMATE);
+    const validatedId = validateInput(UUIDSchema, taskId, 'task ID');
+    const task = taskRepo.setEstimate(validatedId, minutes);
+    if (task) {
+      mainWindow?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'estimate_changed', task });
+    }
+    return task;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_ADD_LABEL, async (_, taskId: string, labelId: string) => {
+    checkRateLimit(IPC_CHANNELS.TASK_ADD_LABEL);
+    const validatedTaskId = validateInput(UUIDSchema, taskId, 'task ID');
+    const validatedLabelId = validateInput(UUIDSchema, labelId, 'label ID');
+    const task = taskRepo.addLabel(validatedTaskId, validatedLabelId);
+    if (task) {
+      mainWindow?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'label_added', task, labelId: validatedLabelId });
+    }
+    return task;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_REMOVE_LABEL, async (_, taskId: string, labelId: string) => {
+    checkRateLimit(IPC_CHANNELS.TASK_REMOVE_LABEL);
+    const validatedTaskId = validateInput(UUIDSchema, taskId, 'task ID');
+    const validatedLabelId = validateInput(UUIDSchema, labelId, 'label ID');
+    const task = taskRepo.removeLabel(validatedTaskId, validatedLabelId);
+    if (task) {
+      mainWindow?.webContents.send(IPC_CHANNELS.TASK_BOARD_EVENT, { type: 'label_removed', task, labelId: validatedLabelId });
+    }
+    return task;
+  });
+
+  // Task Label handlers
+  ipcMain.handle(IPC_CHANNELS.TASK_LABEL_LIST, async (_, workspaceId: string) => {
+    const validated = validateInput(UUIDSchema, workspaceId, 'workspace ID');
+    return taskLabelRepo.list({ workspaceId: validated });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_LABEL_CREATE, async (_, request: any) => {
+    checkRateLimit(IPC_CHANNELS.TASK_LABEL_CREATE);
+    const validatedWorkspaceId = validateInput(UUIDSchema, request.workspaceId, 'workspace ID');
+    return taskLabelRepo.create({ ...request, workspaceId: validatedWorkspaceId });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_LABEL_UPDATE, async (_, id: string, request: any) => {
+    checkRateLimit(IPC_CHANNELS.TASK_LABEL_UPDATE);
+    const validated = validateInput(UUIDSchema, id, 'label ID');
+    return taskLabelRepo.update(validated, request);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TASK_LABEL_DELETE, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.TASK_LABEL_DELETE);
+    const validated = validateInput(UUIDSchema, id, 'label ID');
+    return { success: taskLabelRepo.delete(validated) };
+  });
+
+  // Working State handlers
+  ipcMain.handle(IPC_CHANNELS.WORKING_STATE_GET, async (_, id: string) => {
+    const validated = validateInput(UUIDSchema, id, 'working state ID');
+    return workingStateRepo.findById(validated);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WORKING_STATE_GET_CURRENT, async (_, query: any) => {
+    const validatedAgentRoleId = validateInput(UUIDSchema, query.agentRoleId, 'agent role ID');
+    const validatedWorkspaceId = validateInput(UUIDSchema, query.workspaceId, 'workspace ID');
+    return workingStateRepo.getCurrent({
+      agentRoleId: validatedAgentRoleId,
+      workspaceId: validatedWorkspaceId,
+      taskId: query.taskId,
+      stateType: query.stateType,
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WORKING_STATE_UPDATE, async (_, request: any) => {
+    checkRateLimit(IPC_CHANNELS.WORKING_STATE_UPDATE);
+    const validatedAgentRoleId = validateInput(UUIDSchema, request.agentRoleId, 'agent role ID');
+    const validatedWorkspaceId = validateInput(UUIDSchema, request.workspaceId, 'workspace ID');
+    return workingStateRepo.update({
+      agentRoleId: validatedAgentRoleId,
+      workspaceId: validatedWorkspaceId,
+      taskId: request.taskId,
+      stateType: request.stateType,
+      content: request.content,
+      fileReferences: request.fileReferences,
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WORKING_STATE_HISTORY, async (_, query: any) => {
+    const validatedAgentRoleId = validateInput(UUIDSchema, query.agentRoleId, 'agent role ID');
+    const validatedWorkspaceId = validateInput(UUIDSchema, query.workspaceId, 'workspace ID');
+    return workingStateRepo.getHistory({
+      agentRoleId: validatedAgentRoleId,
+      workspaceId: validatedWorkspaceId,
+      limit: query.limit,
+      offset: query.offset,
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WORKING_STATE_RESTORE, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.WORKING_STATE_RESTORE);
+    const validated = validateInput(UUIDSchema, id, 'working state ID');
+    return workingStateRepo.restore(validated);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WORKING_STATE_DELETE, async (_, id: string) => {
+    checkRateLimit(IPC_CHANNELS.WORKING_STATE_DELETE);
+    const validated = validateInput(UUIDSchema, id, 'working state ID');
+    return { success: workingStateRepo.delete(validated) };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.WORKING_STATE_LIST_FOR_TASK, async (_, taskId: string) => {
+    const validated = validateInput(UUIDSchema, taskId, 'task ID');
+    return workingStateRepo.listForTask(validated);
   });
 
   // Queue handlers

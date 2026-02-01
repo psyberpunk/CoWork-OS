@@ -368,6 +368,12 @@ export interface Task {
   assignedAgentRoleId?: string; // ID of the agent role assigned to this task
   boardColumn?: BoardColumn;    // Kanban column for task organization
   priority?: number;            // Task priority (higher = more important)
+  // Task Board fields
+  labels?: string[];            // JSON array of label IDs
+  dueDate?: number;             // Due date timestamp
+  estimatedMinutes?: number;    // Estimated time in minutes
+  actualMinutes?: number;       // Actual time spent in minutes
+  mentionedAgentRoleIds?: string[]; // Agent roles mentioned in this task
 }
 
 export interface TaskEvent {
@@ -641,6 +647,224 @@ export const BOARD_COLUMNS: { id: BoardColumn; label: string; color: string }[] 
   { id: 'done', label: 'Done', color: '#10b981' },
 ];
 
+/**
+ * Task label for organization
+ */
+export interface TaskLabel {
+  id: string;
+  workspaceId: string;
+  name: string;
+  color: string;
+  createdAt: number;
+}
+
+/**
+ * Request to create a new task label
+ */
+export interface CreateTaskLabelRequest {
+  workspaceId: string;
+  name: string;
+  color?: string;
+}
+
+/**
+ * Request to update a task label
+ */
+export interface UpdateTaskLabelRequest {
+  name?: string;
+  color?: string;
+}
+
+/**
+ * Query parameters for listing task labels
+ */
+export interface TaskLabelListQuery {
+  workspaceId: string;
+}
+
+// ============ Agent Working State Types ============
+
+/**
+ * State type for agent working state
+ */
+export type WorkingStateType = 'context' | 'progress' | 'notes' | 'plan';
+
+/**
+ * Agent working state for context persistence
+ */
+export interface AgentWorkingState {
+  id: string;
+  agentRoleId: string;
+  workspaceId: string;
+  taskId?: string;
+  stateType: WorkingStateType;
+  content: string;
+  fileReferences?: string[];
+  isCurrent: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Request to create or update agent working state
+ */
+export interface UpdateWorkingStateRequest {
+  agentRoleId: string;
+  workspaceId: string;
+  taskId?: string;
+  stateType: WorkingStateType;
+  content: string;
+  fileReferences?: string[];
+}
+
+/**
+ * Query to get agent working state
+ */
+export interface WorkingStateQuery {
+  agentRoleId: string;
+  workspaceId: string;
+  taskId?: string;
+  stateType?: WorkingStateType;
+}
+
+/**
+ * Query to get working state history
+ */
+export interface WorkingStateHistoryQuery {
+  agentRoleId: string;
+  workspaceId: string;
+  limit?: number;
+  offset?: number;
+}
+
+// ============ Activity Feed Types ============
+
+/**
+ * Actor type for activity feed entries
+ */
+export type ActivityActorType = 'agent' | 'user' | 'system';
+
+/**
+ * Type of activity in the feed
+ */
+export type ActivityType =
+  | 'task_created'
+  | 'task_started'
+  | 'task_completed'
+  | 'task_failed'
+  | 'task_paused'
+  | 'task_resumed'
+  | 'file_created'
+  | 'file_modified'
+  | 'file_deleted'
+  | 'command_executed'
+  | 'tool_used'
+  | 'mention'
+  | 'agent_assigned'
+  | 'error'
+  | 'info';
+
+/**
+ * Activity feed entry
+ */
+export interface Activity {
+  id: string;
+  workspaceId: string;
+  taskId?: string;
+  agentRoleId?: string;
+  actorType: ActivityActorType;
+  activityType: ActivityType;
+  title: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+  isRead: boolean;
+  isPinned: boolean;
+  createdAt: number;
+}
+
+/**
+ * Request to create a new activity
+ */
+export interface CreateActivityRequest {
+  workspaceId: string;
+  taskId?: string;
+  agentRoleId?: string;
+  actorType: ActivityActorType;
+  activityType: ActivityType;
+  title: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Activity list query parameters
+ */
+export interface ActivityListQuery {
+  workspaceId: string;
+  taskId?: string;
+  agentRoleId?: string;
+  activityType?: ActivityType | ActivityType[];
+  actorType?: ActivityActorType;
+  isRead?: boolean;
+  isPinned?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+// ============ @Mention System Types ============
+
+/**
+ * Type of mention/request between agents
+ */
+export type MentionType = 'request' | 'handoff' | 'review' | 'fyi';
+
+/**
+ * Status of a mention
+ */
+export type MentionStatus = 'pending' | 'acknowledged' | 'completed' | 'dismissed';
+
+/**
+ * An @mention from one agent to another
+ */
+export interface AgentMention {
+  id: string;
+  workspaceId: string;
+  taskId: string;
+  fromAgentRoleId?: string;
+  toAgentRoleId: string;
+  mentionType: MentionType;
+  context?: string;
+  status: MentionStatus;
+  createdAt: number;
+  acknowledgedAt?: number;
+  completedAt?: number;
+}
+
+/**
+ * Request to create a new mention
+ */
+export interface CreateMentionRequest {
+  workspaceId: string;
+  taskId: string;
+  fromAgentRoleId?: string;
+  toAgentRoleId: string;
+  mentionType: MentionType;
+  context?: string;
+}
+
+/**
+ * Query parameters for listing mentions
+ */
+export interface MentionListQuery {
+  workspaceId?: string;
+  taskId?: string;
+  toAgentRoleId?: string;
+  fromAgentRoleId?: string;
+  status?: MentionStatus | MentionStatus[];
+  limit?: number;
+  offset?: number;
+}
+
 // IPC Channel names
 export const IPC_CHANNELS = {
   // Task operations
@@ -666,6 +890,47 @@ export const IPC_CHANNELS = {
   AGENT_ROLE_ASSIGN_TO_TASK: 'agentRole:assignToTask',
   AGENT_ROLE_GET_DEFAULTS: 'agentRole:getDefaults',
   AGENT_ROLE_SEED_DEFAULTS: 'agentRole:seedDefaults',
+
+  // Activity Feed
+  ACTIVITY_LIST: 'activity:list',
+  ACTIVITY_CREATE: 'activity:create',
+  ACTIVITY_MARK_READ: 'activity:markRead',
+  ACTIVITY_MARK_ALL_READ: 'activity:markAllRead',
+  ACTIVITY_PIN: 'activity:pin',
+  ACTIVITY_DELETE: 'activity:delete',
+  ACTIVITY_EVENT: 'activity:event',
+
+  // @Mention System
+  MENTION_CREATE: 'mention:create',
+  MENTION_LIST: 'mention:list',
+  MENTION_ACKNOWLEDGE: 'mention:acknowledge',
+  MENTION_COMPLETE: 'mention:complete',
+  MENTION_DISMISS: 'mention:dismiss',
+  MENTION_EVENT: 'mention:event',
+
+  // Task Board (Kanban)
+  TASK_MOVE_COLUMN: 'task:moveColumn',
+  TASK_SET_PRIORITY: 'task:setPriority',
+  TASK_SET_DUE_DATE: 'task:setDueDate',
+  TASK_SET_ESTIMATE: 'task:setEstimate',
+  TASK_ADD_LABEL: 'task:addLabel',
+  TASK_REMOVE_LABEL: 'task:removeLabel',
+  TASK_BOARD_EVENT: 'taskBoard:event',
+
+  // Task Labels
+  TASK_LABEL_LIST: 'taskLabel:list',
+  TASK_LABEL_CREATE: 'taskLabel:create',
+  TASK_LABEL_UPDATE: 'taskLabel:update',
+  TASK_LABEL_DELETE: 'taskLabel:delete',
+
+  // Agent Working State
+  WORKING_STATE_GET: 'workingState:get',
+  WORKING_STATE_GET_CURRENT: 'workingState:getCurrent',
+  WORKING_STATE_UPDATE: 'workingState:update',
+  WORKING_STATE_HISTORY: 'workingState:history',
+  WORKING_STATE_RESTORE: 'workingState:restore',
+  WORKING_STATE_DELETE: 'workingState:delete',
+  WORKING_STATE_LIST_FOR_TASK: 'workingState:listForTask',
 
   // Task events (streaming and history)
   TASK_EVENT: 'task:event',

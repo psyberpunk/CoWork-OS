@@ -266,6 +266,42 @@ const IPC_CHANNELS = {
   AGENT_ROLE_ASSIGN_TO_TASK: 'agentRole:assignToTask',
   AGENT_ROLE_GET_DEFAULTS: 'agentRole:getDefaults',
   AGENT_ROLE_SEED_DEFAULTS: 'agentRole:seedDefaults',
+  // Activity Feed
+  ACTIVITY_LIST: 'activity:list',
+  ACTIVITY_CREATE: 'activity:create',
+  ACTIVITY_MARK_READ: 'activity:markRead',
+  ACTIVITY_MARK_ALL_READ: 'activity:markAllRead',
+  ACTIVITY_PIN: 'activity:pin',
+  ACTIVITY_DELETE: 'activity:delete',
+  ACTIVITY_EVENT: 'activity:event',
+  // @Mention System
+  MENTION_CREATE: 'mention:create',
+  MENTION_LIST: 'mention:list',
+  MENTION_ACKNOWLEDGE: 'mention:acknowledge',
+  MENTION_COMPLETE: 'mention:complete',
+  MENTION_DISMISS: 'mention:dismiss',
+  MENTION_EVENT: 'mention:event',
+  // Task Board
+  TASK_MOVE_COLUMN: 'task:moveColumn',
+  TASK_SET_PRIORITY: 'task:setPriority',
+  TASK_SET_DUE_DATE: 'task:setDueDate',
+  TASK_SET_ESTIMATE: 'task:setEstimate',
+  TASK_ADD_LABEL: 'task:addLabel',
+  TASK_REMOVE_LABEL: 'task:removeLabel',
+  TASK_BOARD_EVENT: 'taskBoard:event',
+  // Task Labels
+  TASK_LABEL_LIST: 'taskLabel:list',
+  TASK_LABEL_CREATE: 'taskLabel:create',
+  TASK_LABEL_UPDATE: 'taskLabel:update',
+  TASK_LABEL_DELETE: 'taskLabel:delete',
+  // Agent Working State
+  WORKING_STATE_GET: 'workingState:get',
+  WORKING_STATE_GET_CURRENT: 'workingState:getCurrent',
+  WORKING_STATE_UPDATE: 'workingState:update',
+  WORKING_STATE_HISTORY: 'workingState:history',
+  WORKING_STATE_RESTORE: 'workingState:restore',
+  WORKING_STATE_DELETE: 'workingState:delete',
+  WORKING_STATE_LIST_FOR_TASK: 'workingState:listForTask',
 } as const;
 
 // Mobile Companion Node types (inlined for sandboxed preload)
@@ -1026,6 +1062,189 @@ interface UpdateAgentRoleRequest {
   sortOrder?: number;
 }
 
+// Activity Feed types (inlined for sandboxed preload)
+type ActivityActorType = 'agent' | 'user' | 'system';
+type ActivityType =
+  | 'task_created'
+  | 'task_started'
+  | 'task_completed'
+  | 'task_failed'
+  | 'task_paused'
+  | 'task_resumed'
+  | 'file_created'
+  | 'file_modified'
+  | 'file_deleted'
+  | 'command_executed'
+  | 'tool_used'
+  | 'mention'
+  | 'agent_assigned'
+  | 'error'
+  | 'info';
+
+interface ActivityData {
+  id: string;
+  workspaceId: string;
+  taskId?: string;
+  agentRoleId?: string;
+  actorType: ActivityActorType;
+  activityType: ActivityType;
+  title: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+  isRead: boolean;
+  isPinned: boolean;
+  createdAt: number;
+}
+
+interface CreateActivityRequest {
+  workspaceId: string;
+  taskId?: string;
+  agentRoleId?: string;
+  actorType: ActivityActorType;
+  activityType: ActivityType;
+  title: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface ActivityListQuery {
+  workspaceId: string;
+  taskId?: string;
+  agentRoleId?: string;
+  activityType?: ActivityType | ActivityType[];
+  actorType?: ActivityActorType;
+  isRead?: boolean;
+  isPinned?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+interface ActivityEvent {
+  type: 'created' | 'read' | 'all_read' | 'pinned' | 'deleted';
+  activity?: ActivityData;
+  id?: string;
+  workspaceId?: string;
+}
+
+// @Mention System types (inlined for sandboxed preload)
+type MentionType = 'request' | 'handoff' | 'review' | 'fyi';
+type MentionStatus = 'pending' | 'acknowledged' | 'completed' | 'dismissed';
+
+interface MentionData {
+  id: string;
+  workspaceId: string;
+  taskId: string;
+  fromAgentRoleId?: string;
+  toAgentRoleId: string;
+  mentionType: MentionType;
+  context?: string;
+  status: MentionStatus;
+  createdAt: number;
+  acknowledgedAt?: number;
+  completedAt?: number;
+}
+
+interface CreateMentionRequest {
+  workspaceId: string;
+  taskId: string;
+  fromAgentRoleId?: string;
+  toAgentRoleId: string;
+  mentionType: MentionType;
+  context?: string;
+}
+
+interface MentionListQuery {
+  workspaceId?: string;
+  taskId?: string;
+  toAgentRoleId?: string;
+  fromAgentRoleId?: string;
+  status?: MentionStatus | MentionStatus[];
+  limit?: number;
+  offset?: number;
+}
+
+interface MentionEvent {
+  type: 'created' | 'acknowledged' | 'completed' | 'dismissed';
+  mention?: MentionData;
+}
+
+// Task Board types (inlined for sandboxed preload)
+type TaskBoardColumn = 'backlog' | 'todo' | 'in_progress' | 'review' | 'done';
+
+interface TaskLabelData {
+  id: string;
+  workspaceId: string;
+  name: string;
+  color: string;
+  createdAt: number;
+}
+
+interface CreateTaskLabelRequest {
+  workspaceId: string;
+  name: string;
+  color?: string;
+}
+
+interface UpdateTaskLabelRequest {
+  name?: string;
+  color?: string;
+}
+
+interface TaskLabelListQuery {
+  workspaceId: string;
+}
+
+interface TaskBoardEvent {
+  type: 'moved' | 'priorityChanged' | 'labelAdded' | 'labelRemoved' | 'dueDateChanged' | 'estimateChanged';
+  taskId: string;
+  data?: {
+    column?: TaskBoardColumn;
+    priority?: number;
+    labelId?: string;
+    dueDate?: number | null;
+    estimatedMinutes?: number | null;
+  };
+}
+
+// Agent Working State types (inlined for sandboxed preload)
+type WorkingStateType = 'context' | 'progress' | 'notes' | 'plan';
+
+interface AgentWorkingStateData {
+  id: string;
+  agentRoleId: string;
+  workspaceId: string;
+  taskId?: string;
+  stateType: WorkingStateType;
+  content: string;
+  fileReferences?: string[];
+  isCurrent: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface UpdateWorkingStateRequest {
+  agentRoleId: string;
+  workspaceId: string;
+  taskId?: string;
+  stateType: WorkingStateType;
+  content: string;
+  fileReferences?: string[];
+}
+
+interface WorkingStateQuery {
+  agentRoleId: string;
+  workspaceId: string;
+  taskId?: string;
+  stateType?: WorkingStateType;
+}
+
+interface WorkingStateHistoryQuery {
+  agentRoleId: string;
+  workspaceId: string;
+  limit?: number;
+  offset?: number;
+}
+
 // Expose protected methods that allow the renderer process to use ipcRenderer
 contextBridge.exposeInMainWorld('electronAPI', {
   // Dialog APIs
@@ -1530,6 +1749,87 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_GET_DEFAULTS),
   seedDefaultAgentRoles: () =>
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_SEED_DEFAULTS),
+
+  // Activity Feed APIs
+  listActivities: (query: ActivityListQuery) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_LIST, query),
+  createActivity: (request: CreateActivityRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_CREATE, request),
+  markActivityRead: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_MARK_READ, id),
+  markAllActivitiesRead: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_MARK_ALL_READ, workspaceId),
+  pinActivity: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_PIN, id),
+  deleteActivity: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ACTIVITY_DELETE, id),
+  onActivityEvent: (callback: (event: ActivityEvent) => void) => {
+    const subscription = (_: any, data: ActivityEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.ACTIVITY_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.ACTIVITY_EVENT, subscription);
+  },
+
+  // @Mention System APIs
+  listMentions: (query: MentionListQuery) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MENTION_LIST, query),
+  createMention: (request: CreateMentionRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MENTION_CREATE, request),
+  acknowledgeMention: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MENTION_ACKNOWLEDGE, id),
+  completeMention: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MENTION_COMPLETE, id),
+  dismissMention: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MENTION_DISMISS, id),
+  onMentionEvent: (callback: (event: MentionEvent) => void) => {
+    const subscription = (_: any, data: MentionEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.MENTION_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.MENTION_EVENT, subscription);
+  },
+
+  // Task Board APIs
+  moveTaskToColumn: (taskId: string, column: TaskBoardColumn) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_MOVE_COLUMN, taskId, column),
+  setTaskPriority: (taskId: string, priority: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_SET_PRIORITY, taskId, priority),
+  setTaskDueDate: (taskId: string, dueDate: number | null) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_SET_DUE_DATE, taskId, dueDate),
+  setTaskEstimate: (taskId: string, estimatedMinutes: number | null) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_SET_ESTIMATE, taskId, estimatedMinutes),
+  addTaskLabel: (taskId: string, labelId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_ADD_LABEL, taskId, labelId),
+  removeTaskLabel: (taskId: string, labelId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_REMOVE_LABEL, taskId, labelId),
+  onTaskBoardEvent: (callback: (event: TaskBoardEvent) => void) => {
+    const subscription = (_: any, data: TaskBoardEvent) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.TASK_BOARD_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.TASK_BOARD_EVENT, subscription);
+  },
+
+  // Task Label APIs
+  listTaskLabels: (query: TaskLabelListQuery) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_LABEL_LIST, query),
+  createTaskLabel: (request: CreateTaskLabelRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_LABEL_CREATE, request),
+  updateTaskLabel: (id: string, request: UpdateTaskLabelRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_LABEL_UPDATE, id, request),
+  deleteTaskLabel: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_LABEL_DELETE, id),
+
+  // Agent Working State APIs
+  getWorkingState: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_GET, id),
+  getCurrentWorkingState: (query: WorkingStateQuery) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_GET_CURRENT, query),
+  updateWorkingState: (request: UpdateWorkingStateRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_UPDATE, request),
+  getWorkingStateHistory: (query: WorkingStateHistoryQuery) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_HISTORY, query),
+  restoreWorkingState: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_RESTORE, id),
+  deleteWorkingState: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_DELETE, id),
+  listWorkingStatesForTask: (taskId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WORKING_STATE_LIST_FOR_TASK, taskId),
 });
 
 // Type declarations for TypeScript
@@ -1555,6 +1855,44 @@ export type {
   AgentRoleData,
   CreateAgentRoleRequest,
   UpdateAgentRoleRequest,
+};
+
+// Export Activity Feed types
+export type {
+  ActivityActorType,
+  ActivityType,
+  ActivityData,
+  ActivityListQuery,
+  ActivityEvent,
+};
+
+// Export @Mention System types
+export type {
+  MentionType,
+  MentionStatus,
+  MentionData,
+  CreateMentionRequest,
+  MentionListQuery,
+  MentionEvent,
+};
+
+// Export Task Board types
+export type {
+  TaskBoardColumn,
+  TaskLabelData,
+  CreateTaskLabelRequest,
+  UpdateTaskLabelRequest,
+  TaskLabelListQuery,
+  TaskBoardEvent,
+};
+
+// Export Agent Working State types
+export type {
+  WorkingStateType,
+  AgentWorkingStateData,
+  UpdateWorkingStateRequest,
+  WorkingStateQuery,
+  WorkingStateHistoryQuery,
 };
 
 export interface ElectronAPI {
@@ -2012,6 +2350,44 @@ export interface ElectronAPI {
   assignAgentRoleToTask: (taskId: string, agentRoleId: string | null) => Promise<boolean>;
   getDefaultAgentRoles: () => Promise<Omit<AgentRoleData, 'id' | 'createdAt' | 'updatedAt'>[]>;
   seedDefaultAgentRoles: () => Promise<AgentRoleData[]>;
+
+  // Activity Feed
+  listActivities: (query: ActivityListQuery) => Promise<ActivityData[]>;
+  createActivity: (request: CreateActivityRequest) => Promise<ActivityData>;
+  markActivityRead: (id: string) => Promise<{ success: boolean }>;
+  markAllActivitiesRead: (workspaceId: string) => Promise<{ count: number }>;
+  pinActivity: (id: string) => Promise<ActivityData | undefined>;
+  deleteActivity: (id: string) => Promise<{ success: boolean }>;
+  onActivityEvent: (callback: (event: ActivityEvent) => void) => () => void;
+
+  // @Mention System
+  listMentions: (query: MentionListQuery) => Promise<MentionData[]>;
+  createMention: (request: CreateMentionRequest) => Promise<MentionData>;
+  acknowledgeMention: (id: string) => Promise<MentionData | undefined>;
+  completeMention: (id: string) => Promise<MentionData | undefined>;
+  dismissMention: (id: string) => Promise<MentionData | undefined>;
+  onMentionEvent: (callback: (event: MentionEvent) => void) => () => void;
+  // Task Board APIs
+  moveTaskToColumn: (taskId: string, column: TaskBoardColumn) => Promise<any>;
+  setTaskPriority: (taskId: string, priority: number) => Promise<any>;
+  setTaskDueDate: (taskId: string, dueDate: number | null) => Promise<any>;
+  setTaskEstimate: (taskId: string, estimatedMinutes: number | null) => Promise<any>;
+  addTaskLabel: (taskId: string, labelId: string) => Promise<any>;
+  removeTaskLabel: (taskId: string, labelId: string) => Promise<any>;
+  onTaskBoardEvent: (callback: (event: TaskBoardEvent) => void) => () => void;
+  // Task Label APIs
+  listTaskLabels: (query: TaskLabelListQuery) => Promise<TaskLabelData[]>;
+  createTaskLabel: (request: CreateTaskLabelRequest) => Promise<TaskLabelData>;
+  updateTaskLabel: (id: string, request: UpdateTaskLabelRequest) => Promise<TaskLabelData>;
+  deleteTaskLabel: (id: string) => Promise<boolean>;
+  // Agent Working State APIs
+  getWorkingState: (id: string) => Promise<AgentWorkingStateData | undefined>;
+  getCurrentWorkingState: (query: WorkingStateQuery) => Promise<AgentWorkingStateData | undefined>;
+  updateWorkingState: (request: UpdateWorkingStateRequest) => Promise<AgentWorkingStateData>;
+  getWorkingStateHistory: (query: WorkingStateHistoryQuery) => Promise<AgentWorkingStateData[]>;
+  restoreWorkingState: (id: string) => Promise<AgentWorkingStateData | undefined>;
+  deleteWorkingState: (id: string) => Promise<{ success: boolean }>;
+  listWorkingStatesForTask: (taskId: string) => Promise<AgentWorkingStateData[]>;
 }
 
 // Migration status type (for showing one-time notifications after app rename)

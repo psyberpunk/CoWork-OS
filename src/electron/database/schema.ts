@@ -600,6 +600,213 @@ export class DatabaseManager {
     } catch {
       // Index already exists, ignore
     }
+
+    // Migration: Create agent_roles table for Agent Squad feature
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_roles (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL UNIQUE,
+          display_name TEXT NOT NULL,
+          description TEXT,
+          icon TEXT DEFAULT '🤖',
+          color TEXT DEFAULT '#6366f1',
+          personality_id TEXT,
+          model_key TEXT,
+          provider_type TEXT,
+          system_prompt TEXT,
+          capabilities TEXT NOT NULL,
+          tool_restrictions TEXT,
+          is_system INTEGER NOT NULL DEFAULT 0,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          sort_order INTEGER NOT NULL DEFAULT 100,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_roles_active ON agent_roles(is_active);
+        CREATE INDEX IF NOT EXISTS idx_agent_roles_name ON agent_roles(name);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
+
+    // Migration: Add assigned_agent_role_id to tasks table
+    const agentRoleColumns = [
+      'ALTER TABLE tasks ADD COLUMN assigned_agent_role_id TEXT REFERENCES agent_roles(id)',
+      'ALTER TABLE tasks ADD COLUMN board_column TEXT DEFAULT "backlog"',
+      'ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0',
+    ];
+
+    for (const sql of agentRoleColumns) {
+      try {
+        this.db.exec(sql);
+      } catch {
+        // Column already exists, ignore
+      }
+    }
+
+    // Add index for agent role lookups on tasks
+    try {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_agent_role ON tasks(assigned_agent_role_id)');
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_board_column ON tasks(board_column)');
+    } catch {
+      // Index already exists, ignore
+    }
+
+    // Migration: Create activity_feed table for cross-agent activity stream
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS activity_feed (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          task_id TEXT,
+          agent_role_id TEXT,
+          actor_type TEXT NOT NULL,
+          activity_type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          metadata TEXT,
+          is_read INTEGER DEFAULT 0,
+          is_pinned INTEGER DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+          FOREIGN KEY (task_id) REFERENCES tasks(id),
+          FOREIGN KEY (agent_role_id) REFERENCES agent_roles(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_activity_workspace ON activity_feed(workspace_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_activity_unread ON activity_feed(workspace_id, is_read);
+        CREATE INDEX IF NOT EXISTS idx_activity_type ON activity_feed(activity_type);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
+
+    // Migration: Create agent_mentions table for inter-agent communication
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_mentions (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          from_agent_role_id TEXT,
+          to_agent_role_id TEXT NOT NULL,
+          mention_type TEXT NOT NULL,
+          context TEXT,
+          status TEXT DEFAULT 'pending',
+          created_at INTEGER NOT NULL,
+          acknowledged_at INTEGER,
+          completed_at INTEGER,
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+          FOREIGN KEY (task_id) REFERENCES tasks(id),
+          FOREIGN KEY (from_agent_role_id) REFERENCES agent_roles(id),
+          FOREIGN KEY (to_agent_role_id) REFERENCES agent_roles(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mentions_to_agent ON agent_mentions(to_agent_role_id, status);
+        CREATE INDEX IF NOT EXISTS idx_mentions_task ON agent_mentions(task_id);
+        CREATE INDEX IF NOT EXISTS idx_mentions_workspace ON agent_mentions(workspace_id, created_at DESC);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
+
+    // Migration: Add mentioned_agent_role_ids to tasks table
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN mentioned_agent_role_ids TEXT');
+    } catch {
+      // Column already exists, ignore
+    }
+
+    // Migration: Add task board columns to tasks table (Phase 1.4)
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN board_column TEXT DEFAULT \'backlog\'');
+    } catch {
+      // Column already exists, ignore
+    }
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0');
+    } catch {
+      // Column already exists, ignore
+    }
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN labels TEXT');
+    } catch {
+      // Column already exists, ignore
+    }
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN due_date INTEGER');
+    } catch {
+      // Column already exists, ignore
+    }
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN estimated_minutes INTEGER');
+    } catch {
+      // Column already exists, ignore
+    }
+    try {
+      this.db.exec('ALTER TABLE tasks ADD COLUMN actual_minutes INTEGER');
+    } catch {
+      // Column already exists, ignore
+    }
+
+    // Migration: Create task_labels table for custom labels
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS task_labels (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          color TEXT DEFAULT '#6366f1',
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+          UNIQUE(workspace_id, name)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_task_labels_workspace ON task_labels(workspace_id);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
+
+    // Migration: Create index for task board queries
+    try {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_board ON tasks(workspace_id, board_column)');
+    } catch {
+      // Index already exists, ignore
+    }
+    try {
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority DESC)');
+    } catch {
+      // Index already exists, ignore
+    }
+
+    // Migration: Create agent_working_state table (Phase 1.5)
+    try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_working_state (
+          id TEXT PRIMARY KEY,
+          agent_role_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          task_id TEXT,
+          state_type TEXT NOT NULL,
+          content TEXT NOT NULL,
+          file_references TEXT,
+          is_current INTEGER DEFAULT 1,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (agent_role_id) REFERENCES agent_roles(id),
+          FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+          FOREIGN KEY (task_id) REFERENCES tasks(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_working_state_agent ON agent_working_state(agent_role_id, workspace_id, is_current);
+        CREATE INDEX IF NOT EXISTS idx_working_state_task ON agent_working_state(task_id);
+      `);
+    } catch {
+      // Table already exists, ignore
+    }
   }
 
   private seedDefaultModels() {

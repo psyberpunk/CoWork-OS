@@ -16,6 +16,7 @@ import { ImageTools } from './image-tools';
 import { SystemTools } from './system-tools';
 import { CronTools } from './cron-tools';
 import { CanvasTools } from './canvas-tools';
+import { MentionTools } from './mention-tools';
 import { LLMTool } from '../llm/types';
 import { SearchProviderFactory } from '../search';
 import { MCPClientManager } from '../../mcp/client/MCPClientManager';
@@ -44,6 +45,7 @@ export class ToolRegistry {
   private systemTools: SystemTools;
   private cronTools: CronTools;
   private canvasTools: CanvasTools;
+  private mentionTools: MentionTools;
   private gatewayContext?: GatewayContextType;
   private shadowedToolsLogged = false;
 
@@ -66,6 +68,7 @@ export class ToolRegistry {
     this.systemTools = new SystemTools(workspace, daemon, taskId);
     this.cronTools = new CronTools(workspace, daemon, taskId);
     this.canvasTools = new CanvasTools(workspace, daemon, taskId);
+    this.mentionTools = new MentionTools(workspace.id, taskId, daemon);
     this.gatewayContext = gatewayContext;
   }
 
@@ -173,6 +176,9 @@ export class ToolRegistry {
 
     // Always add canvas tools (enables visual workspace)
     allTools.push(...CanvasTools.getToolDefinitions());
+
+    // Always add mention tools (enables multi-agent collaboration)
+    allTools.push(...MentionTools.getToolDefinitions());
 
     // Add meta tools for execution control
     allTools.push(...this.getMetaToolDefinitions());
@@ -632,6 +638,13 @@ ${skillDescriptions}`;
     if (name === 'canvas_eval') return await this.canvasTools.evalScript(input.session_id, input.script);
     if (name === 'canvas_snapshot') return await this.canvasTools.takeSnapshot(input.session_id);
     if (name === 'canvas_list') return this.canvasTools.listSessions();
+
+    // Mention tools (multi-agent collaboration)
+    if (name === 'list_agent_roles') return await this.mentionTools.listAgentRoles();
+    if (name === 'mention_agent') return await this.mentionTools.mentionAgent(input);
+    if (name === 'get_pending_mentions') return await this.mentionTools.getPendingMentions();
+    if (name === 'acknowledge_mention') return await this.mentionTools.acknowledgeMention(input.mentionId);
+    if (name === 'complete_mention') return await this.mentionTools.completeMention(input.mentionId);
 
     // Meta tools
     if (name === 'revise_plan') {
