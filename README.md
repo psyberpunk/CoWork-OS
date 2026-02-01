@@ -401,6 +401,12 @@ The packaged app will be in the `release/` directory.
   <em>Settings panel for AI providers and channel configuration</em>
 </p>
 
+<p align="center">
+  <img src="screenshots/cowork-os-settings3.png" alt="CoWork OS Channel Settings" width="800">
+  <br>
+  <em>Messaging channel integrations and security modes</em>
+</p>
+
 ---
 
 ## Usage
