@@ -7,11 +7,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { CustomSkill } from '../../../shared/types';
 
-// Path to the actual skill file
-const SKILL_PATH = path.join(
-  process.env.HOME || '',
-  'Library/Application Support/cowork-os/skills/auto-commenter.json'
-);
+// Path to the skill file in the repo
+const SKILL_PATH = path.join(__dirname, '../../../../resources/skills/auto-commenter.json');
 
 describe('Auto Commenter Skill', () => {
   let skillData: CustomSkill;
