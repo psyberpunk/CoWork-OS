@@ -794,6 +794,7 @@ function isValidPersonaId(value: unknown): value is PersonaId {
     'sensei',
     'pirate',
     'noir',
+    'companion',
   ];
   return validIds.includes(value as PersonaId);
 }

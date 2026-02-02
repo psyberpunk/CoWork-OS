@@ -4,25 +4,42 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-let mockSettings: Record<string, unknown> = {};
+let mockStoredSettings: Record<string, unknown> | undefined = undefined;
 let writeCount = 0;
 
-// Mock fs module
+const mockRepositorySave = vi.fn().mockImplementation((_category: string, settings: unknown) => {
+  mockStoredSettings = settings as Record<string, unknown>;
+  writeCount++;
+});
+const mockRepositoryLoad = vi.fn().mockImplementation(() => mockStoredSettings);
+const mockRepositoryExists = vi.fn().mockImplementation(() => mockStoredSettings !== undefined);
+
+// Mock SecureSettingsRepository
+vi.mock('../../database/SecureSettingsRepository', () => ({
+  SecureSettingsRepository: {
+    isInitialized: vi.fn().mockReturnValue(true),
+    getInstance: vi.fn().mockImplementation(() => ({
+      save: mockRepositorySave,
+      load: mockRepositoryLoad,
+      exists: mockRepositoryExists,
+    })),
+  },
+}));
+
+// Mock fs module (legacy migration path)
 vi.mock('fs', () => ({
   default: {
-    existsSync: vi.fn().mockImplementation(() => Object.keys(mockSettings).length > 0),
-    readFileSync: vi.fn().mockImplementation(() => JSON.stringify(mockSettings)),
-    writeFileSync: vi.fn().mockImplementation((path: string, data: string) => {
-      mockSettings = JSON.parse(data);
-      writeCount++;
-    }),
+    existsSync: vi.fn().mockReturnValue(false),
+    readFileSync: vi.fn().mockReturnValue('{}'),
+    writeFileSync: vi.fn(),
+    copyFileSync: vi.fn(),
+    unlinkSync: vi.fn(),
   },
-  existsSync: vi.fn().mockImplementation(() => Object.keys(mockSettings).length > 0),
-  readFileSync: vi.fn().mockImplementation(() => JSON.stringify(mockSettings)),
-  writeFileSync: vi.fn().mockImplementation((path: string, data: string) => {
-    mockSettings = JSON.parse(data);
-    writeCount++;
-  }),
+  existsSync: vi.fn().mockReturnValue(false),
+  readFileSync: vi.fn().mockReturnValue('{}'),
+  writeFileSync: vi.fn(),
+  copyFileSync: vi.fn(),
+  unlinkSync: vi.fn(),
 }));
 
 // Mock electron
@@ -95,9 +112,10 @@ describe('DEFAULT_CONTROL_PLANE_SETTINGS', () => {
 describe('ControlPlaneSettingsManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
+    mockStoredSettings = undefined;
     writeCount = 0;
     ControlPlaneSettingsManager.clearCache();
+    (ControlPlaneSettingsManager as any).migrationCompleted = false;
   });
 
   describe('loadSettings', () => {
@@ -112,7 +130,7 @@ describe('ControlPlaneSettingsManager', () => {
     });
 
     it('should load existing settings', () => {
-      mockSettings = {
+      mockStoredSettings = {
         enabled: true,
         port: 9999,
         host: '0.0.0.0',
@@ -134,7 +152,7 @@ describe('ControlPlaneSettingsManager', () => {
     });
 
     it('should merge with defaults for missing fields', () => {
-      mockSettings = {
+      mockStoredSettings = {
         enabled: true,
       };
 
@@ -146,10 +164,10 @@ describe('ControlPlaneSettingsManager', () => {
     });
 
     it('should cache loaded settings', () => {
-      mockSettings = { enabled: true };
+      mockStoredSettings = { enabled: true };
 
       const settings1 = ControlPlaneSettingsManager.loadSettings();
-      mockSettings = { enabled: false }; // Change mock
+      mockStoredSettings = { enabled: false }; // Change mock
       const settings2 = ControlPlaneSettingsManager.loadSettings();
 
       // Should return cached value
@@ -166,8 +184,8 @@ describe('ControlPlaneSettingsManager', () => {
       ControlPlaneSettingsManager.saveSettings(settings);
 
       expect(writeCount).toBe(1);
-      expect(mockSettings.enabled).toBe(true);
-      expect(mockSettings.port).toBe(8080);
+      expect((mockStoredSettings as any).enabled).toBe(true);
+      expect((mockStoredSettings as any).port).toBe(8080);
     });
 
     it('should update cache after save', () => {
@@ -184,22 +202,22 @@ describe('ControlPlaneSettingsManager', () => {
     it('should update and save settings', () => {
       ControlPlaneSettingsManager.updateSettings({ enabled: true, port: 9999 });
 
-      expect(mockSettings.enabled).toBe(true);
-      expect(mockSettings.port).toBe(9999);
+      expect((mockStoredSettings as any).enabled).toBe(true);
+      expect((mockStoredSettings as any).port).toBe(9999);
     });
 
     it('should merge with existing settings', () => {
-      mockSettings = { enabled: false, port: 8080 };
+      mockStoredSettings = { enabled: false, port: 8080 };
       ControlPlaneSettingsManager.clearCache();
 
       ControlPlaneSettingsManager.updateSettings({ enabled: true });
 
-      expect(mockSettings.enabled).toBe(true);
-      expect(mockSettings.port).toBe(8080); // preserved
+      expect((mockStoredSettings as any).enabled).toBe(true);
+      expect((mockStoredSettings as any).port).toBe(8080); // preserved
     });
 
     it('should handle nested tailscale updates', () => {
-      mockSettings = {
+      mockStoredSettings = {
         tailscale: { mode: 'off', resetOnExit: true },
       };
       ControlPlaneSettingsManager.clearCache();
@@ -208,7 +226,7 @@ describe('ControlPlaneSettingsManager', () => {
         tailscale: { mode: 'funnel', resetOnExit: true },
       });
 
-      expect((mockSettings.tailscale as any).mode).toBe('funnel');
+      expect(((mockStoredSettings as any).tailscale as any).mode).toBe('funnel');
     });
   });
 
@@ -222,7 +240,7 @@ describe('ControlPlaneSettingsManager', () => {
     });
 
     it('should preserve existing token', () => {
-      mockSettings = { token: 'existing-token' };
+      mockStoredSettings = { token: 'existing-token' };
       ControlPlaneSettingsManager.clearCache();
 
       const settings = ControlPlaneSettingsManager.enable();
@@ -233,7 +251,7 @@ describe('ControlPlaneSettingsManager', () => {
 
   describe('disable', () => {
     it('should disable settings', () => {
-      mockSettings = { enabled: true, token: 'test' };
+      mockStoredSettings = { enabled: true, token: 'test' };
       ControlPlaneSettingsManager.clearCache();
 
       const settings = ControlPlaneSettingsManager.disable();
@@ -242,7 +260,7 @@ describe('ControlPlaneSettingsManager', () => {
     });
 
     it('should preserve token when disabling', () => {
-      mockSettings = { enabled: true, token: 'test-token' };
+      mockStoredSettings = { enabled: true, token: 'test-token' };
       ControlPlaneSettingsManager.clearCache();
 
       const settings = ControlPlaneSettingsManager.disable();
@@ -253,7 +271,7 @@ describe('ControlPlaneSettingsManager', () => {
 
   describe('regenerateToken', () => {
     it('should generate a new token', () => {
-      mockSettings = { token: 'old-token' };
+      mockStoredSettings = { token: 'old-token' };
       ControlPlaneSettingsManager.clearCache();
 
       const newToken = ControlPlaneSettingsManager.regenerateToken();
@@ -272,7 +290,7 @@ describe('ControlPlaneSettingsManager', () => {
 
   describe('getSettingsForDisplay', () => {
     it('should mask token', () => {
-      mockSettings = { token: 'secret-token' };
+      mockStoredSettings = { token: 'secret-token' };
       ControlPlaneSettingsManager.clearCache();
 
       const display = ControlPlaneSettingsManager.getSettingsForDisplay();
@@ -281,7 +299,7 @@ describe('ControlPlaneSettingsManager', () => {
     });
 
     it('should show empty string for missing token', () => {
-      mockSettings = { token: '' };
+      mockStoredSettings = { token: '' };
       ControlPlaneSettingsManager.clearCache();
 
       const display = ControlPlaneSettingsManager.getSettingsForDisplay();
@@ -292,21 +310,21 @@ describe('ControlPlaneSettingsManager', () => {
 
   describe('isConfigured', () => {
     it('should return true when properly configured', () => {
-      mockSettings = { enabled: true, token: 'test-token' };
+      mockStoredSettings = { enabled: true, token: 'test-token' };
       ControlPlaneSettingsManager.clearCache();
 
       expect(ControlPlaneSettingsManager.isConfigured()).toBe(true);
     });
 
     it('should return false when disabled', () => {
-      mockSettings = { enabled: false, token: 'test-token' };
+      mockStoredSettings = { enabled: false, token: 'test-token' };
       ControlPlaneSettingsManager.clearCache();
 
       expect(ControlPlaneSettingsManager.isConfigured()).toBe(false);
     });
 
     it('should return false when no token', () => {
-      mockSettings = { enabled: true, token: '' };
+      mockStoredSettings = { enabled: true, token: '' };
       ControlPlaneSettingsManager.clearCache();
 
       expect(ControlPlaneSettingsManager.isConfigured()).toBe(false);
@@ -315,11 +333,11 @@ describe('ControlPlaneSettingsManager', () => {
 
   describe('clearCache', () => {
     it('should clear the cached settings', () => {
-      mockSettings = { enabled: true };
+      mockStoredSettings = { enabled: true };
       ControlPlaneSettingsManager.loadSettings();
 
       ControlPlaneSettingsManager.clearCache();
-      mockSettings = { enabled: false };
+      mockStoredSettings = { enabled: false };
 
       const settings = ControlPlaneSettingsManager.loadSettings();
       expect(settings.enabled).toBe(false);
@@ -360,7 +378,7 @@ describe('ControlPlaneSettingsManager', () => {
     });
 
     it('should preserve connection mode when loading existing settings', () => {
-      mockSettings = {
+      mockStoredSettings = {
         connectionMode: 'remote',
       };
       ControlPlaneSettingsManager.clearCache();
@@ -385,13 +403,13 @@ describe('ControlPlaneSettingsManager', () => {
 
       ControlPlaneSettingsManager.updateSettings({ remote: remoteConfig });
 
-      expect(mockSettings.remote).toBeDefined();
-      expect((mockSettings.remote as any).url).toBe('ws://remote-host:18789');
-      expect((mockSettings.remote as any).deviceName).toBe('Test Client');
+      expect((mockStoredSettings as any).remote).toBeDefined();
+      expect(((mockStoredSettings as any).remote as any).url).toBe('ws://remote-host:18789');
+      expect(((mockStoredSettings as any).remote as any).deviceName).toBe('Test Client');
     });
 
     it('should load remote config', () => {
-      mockSettings = {
+      mockStoredSettings = {
         remote: {
           url: 'ws://saved-host:18789',
           token: 'saved-token',
@@ -409,7 +427,7 @@ describe('ControlPlaneSettingsManager', () => {
     });
 
     it('should merge remote config with defaults', () => {
-      mockSettings = {
+      mockStoredSettings = {
         remote: {
           url: 'ws://host:8080',
           token: 'token',
@@ -428,7 +446,7 @@ describe('ControlPlaneSettingsManager', () => {
     });
 
     it('should mask remote token in display settings', () => {
-      mockSettings = {
+      mockStoredSettings = {
         remote: {
           url: 'ws://host:18789',
           token: 'secret-remote-token',
@@ -446,7 +464,7 @@ describe('ControlPlaneSettingsManager', () => {
     });
 
     it('should show empty string for missing remote token in display', () => {
-      mockSettings = {
+      mockStoredSettings = {
         remote: {
           url: 'ws://host:18789',
           token: '',
@@ -460,7 +478,7 @@ describe('ControlPlaneSettingsManager', () => {
     });
 
     it('should update nested remote config fields', () => {
-      mockSettings = {
+      mockStoredSettings = {
         remote: {
           url: 'ws://old-host:18789',
           token: 'old-token',
@@ -473,8 +491,8 @@ describe('ControlPlaneSettingsManager', () => {
         remote: { url: 'ws://new-host:18789', token: 'new-token', deviceName: 'New Name' },
       });
 
-      expect((mockSettings.remote as any).url).toBe('ws://new-host:18789');
-      expect((mockSettings.remote as any).deviceName).toBe('New Name');
+      expect(((mockStoredSettings as any).remote as any).url).toBe('ws://new-host:18789');
+      expect(((mockStoredSettings as any).remote as any).deviceName).toBe('New Name');
     });
   });
 });

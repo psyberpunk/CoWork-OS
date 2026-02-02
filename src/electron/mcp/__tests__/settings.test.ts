@@ -4,25 +4,44 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-// Track writes manually since mocking fs can be complex
 let writeCount = 0;
+let mockStoredSettings: Record<string, unknown> | undefined = undefined;
 
-// Mock fs module entirely
+const mockRepositorySave = vi.fn().mockImplementation((_category: string, settings: unknown) => {
+  mockStoredSettings = settings as Record<string, unknown>;
+  writeCount++;
+});
+const mockRepositoryLoad = vi.fn().mockImplementation(() => mockStoredSettings);
+const mockRepositoryExists = vi.fn().mockImplementation(() => mockStoredSettings !== undefined);
+
+// Mock SecureSettingsRepository
+vi.mock('../../database/SecureSettingsRepository', () => ({
+  SecureSettingsRepository: {
+    isInitialized: vi.fn().mockReturnValue(true),
+    getInstance: vi.fn().mockImplementation(() => ({
+      save: mockRepositorySave,
+      load: mockRepositoryLoad,
+      exists: mockRepositoryExists,
+    })),
+  },
+}));
+
+// Mock fs module (legacy migration path)
 vi.mock('node:fs', () => ({
   default: {
     existsSync: vi.fn().mockReturnValue(false),
     readFileSync: vi.fn().mockReturnValue('{}'),
-    writeFileSync: vi.fn().mockImplementation(() => {
-      writeCount++;
-    }),
+    writeFileSync: vi.fn(),
     mkdirSync: vi.fn(),
+    copyFileSync: vi.fn(),
+    unlinkSync: vi.fn(),
   },
   existsSync: vi.fn().mockReturnValue(false),
   readFileSync: vi.fn().mockReturnValue('{}'),
-  writeFileSync: vi.fn().mockImplementation(() => {
-    writeCount++;
-  }),
+  writeFileSync: vi.fn(),
   mkdirSync: vi.fn(),
+  copyFileSync: vi.fn(),
+  unlinkSync: vi.fn(),
 }));
 
 // Mock electron
@@ -44,7 +63,9 @@ describe('MCPSettingsManager batch mode', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     writeCount = 0;
+    mockStoredSettings = undefined;
     MCPSettingsManager.clearCache();
+    (MCPSettingsManager as any).migrationCompleted = false;
   });
 
   it('should defer saves when in batch mode', () => {

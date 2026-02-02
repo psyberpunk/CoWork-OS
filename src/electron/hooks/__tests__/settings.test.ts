@@ -4,25 +4,42 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-let mockSettings: Record<string, unknown> = {};
+let mockStoredSettings: Record<string, unknown> | undefined = undefined;
 let writeCount = 0;
 
-// Mock fs module
+const mockRepositorySave = vi.fn().mockImplementation((_category: string, settings: unknown) => {
+  mockStoredSettings = settings as Record<string, unknown>;
+  writeCount++;
+});
+const mockRepositoryLoad = vi.fn().mockImplementation(() => mockStoredSettings);
+const mockRepositoryExists = vi.fn().mockImplementation(() => mockStoredSettings !== undefined);
+
+// Mock SecureSettingsRepository
+vi.mock('../../database/SecureSettingsRepository', () => ({
+  SecureSettingsRepository: {
+    isInitialized: vi.fn().mockReturnValue(true),
+    getInstance: vi.fn().mockImplementation(() => ({
+      save: mockRepositorySave,
+      load: mockRepositoryLoad,
+      exists: mockRepositoryExists,
+    })),
+  },
+}));
+
+// Mock fs module (legacy migration path)
 vi.mock('fs', () => ({
   default: {
-    existsSync: vi.fn().mockImplementation(() => Object.keys(mockSettings).length > 0),
-    readFileSync: vi.fn().mockImplementation(() => JSON.stringify(mockSettings)),
-    writeFileSync: vi.fn().mockImplementation((path: string, data: string) => {
-      mockSettings = JSON.parse(data);
-      writeCount++;
-    }),
+    existsSync: vi.fn().mockReturnValue(false),
+    readFileSync: vi.fn().mockReturnValue('{}'),
+    writeFileSync: vi.fn(),
+    copyFileSync: vi.fn(),
+    unlinkSync: vi.fn(),
   },
-  existsSync: vi.fn().mockImplementation(() => Object.keys(mockSettings).length > 0),
-  readFileSync: vi.fn().mockImplementation(() => JSON.stringify(mockSettings)),
-  writeFileSync: vi.fn().mockImplementation((path: string, data: string) => {
-    mockSettings = JSON.parse(data);
-    writeCount++;
-  }),
+  existsSync: vi.fn().mockReturnValue(false),
+  readFileSync: vi.fn().mockReturnValue('{}'),
+  writeFileSync: vi.fn(),
+  copyFileSync: vi.fn(),
+  unlinkSync: vi.fn(),
 }));
 
 // Mock electron
@@ -31,9 +48,9 @@ vi.mock('electron', () => ({
     getPath: vi.fn().mockReturnValue('/mock/user/data'),
   },
   safeStorage: {
-    isEncryptionAvailable: vi.fn().mockReturnValue(false),
-    encryptString: vi.fn(),
-    decryptString: vi.fn(),
+    isEncryptionAvailable: vi.fn().mockReturnValue(true),
+    encryptString: vi.fn().mockImplementation((value: string) => Buffer.from(value, 'utf-8')),
+    decryptString: vi.fn().mockImplementation((buffer: Buffer) => buffer.toString('utf-8')),
   },
 }));
 
@@ -68,9 +85,10 @@ describe('generateHookToken', () => {
 describe('HooksSettingsManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
+    mockStoredSettings = undefined;
     writeCount = 0;
     HooksSettingsManager.clearCache();
+    (HooksSettingsManager as any).migrationCompleted = false;
   });
 
   describe('loadSettings', () => {
@@ -86,7 +104,7 @@ describe('HooksSettingsManager', () => {
     });
 
     it('should load existing settings', () => {
-      mockSettings = {
+      mockStoredSettings = {
         enabled: true,
         token: 'test-token',
         path: '/webhooks',
@@ -102,10 +120,10 @@ describe('HooksSettingsManager', () => {
     });
 
     it('should cache loaded settings', () => {
-      mockSettings = { enabled: true };
+      mockStoredSettings = { enabled: true };
 
       const settings1 = HooksSettingsManager.loadSettings();
-      mockSettings = { enabled: false }; // Change mock
+      mockStoredSettings = { enabled: false }; // Change mock
       const settings2 = HooksSettingsManager.loadSettings();
 
       // Should return cached value
@@ -122,7 +140,7 @@ describe('HooksSettingsManager', () => {
       HooksSettingsManager.saveSettings(settings);
 
       expect(writeCount).toBe(1);
-      expect(mockSettings.enabled).toBe(true);
+      expect(mockStoredSettings.enabled).toBe(true);
     });
 
     it('should update cache after save', () => {
@@ -137,11 +155,11 @@ describe('HooksSettingsManager', () => {
 
   describe('clearCache', () => {
     it('should clear the cached settings', () => {
-      mockSettings = { enabled: true };
+      mockStoredSettings = { enabled: true };
       HooksSettingsManager.loadSettings();
 
       HooksSettingsManager.clearCache();
-      mockSettings = { enabled: false };
+      mockStoredSettings = { enabled: false };
 
       const settings = HooksSettingsManager.loadSettings();
       expect(settings.enabled).toBe(false);
@@ -162,17 +180,17 @@ describe('HooksSettingsManager', () => {
     it('should update and save config', () => {
       HooksSettingsManager.updateConfig({ enabled: true });
 
-      expect(mockSettings.enabled).toBe(true);
+      expect(mockStoredSettings.enabled).toBe(true);
     });
 
     it('should merge with existing config', () => {
-      mockSettings = { enabled: false, path: '/custom' };
+      mockStoredSettings = { enabled: false, path: '/custom' };
       HooksSettingsManager.clearCache();
 
       HooksSettingsManager.updateConfig({ enabled: true });
 
-      expect(mockSettings.enabled).toBe(true);
-      expect(mockSettings.path).toBe('/custom');
+      expect(mockStoredSettings.enabled).toBe(true);
+      expect(mockStoredSettings.path).toBe('/custom');
     });
   });
 
@@ -186,7 +204,7 @@ describe('HooksSettingsManager', () => {
     });
 
     it('should preserve existing token', () => {
-      mockSettings = { token: 'existing-token' };
+      mockStoredSettings = { token: 'existing-token' };
       HooksSettingsManager.clearCache();
 
       const settings = HooksSettingsManager.enableHooks();
@@ -197,7 +215,7 @@ describe('HooksSettingsManager', () => {
 
   describe('disableHooks', () => {
     it('should disable hooks', () => {
-      mockSettings = { enabled: true, token: 'test' };
+      mockStoredSettings = { enabled: true, token: 'test' };
       HooksSettingsManager.clearCache();
 
       const settings = HooksSettingsManager.disableHooks();
@@ -206,7 +224,7 @@ describe('HooksSettingsManager', () => {
     });
 
     it('should preserve token when disabling', () => {
-      mockSettings = { enabled: true, token: 'test' };
+      mockStoredSettings = { enabled: true, token: 'test' };
       HooksSettingsManager.clearCache();
 
       const settings = HooksSettingsManager.disableHooks();
@@ -217,7 +235,7 @@ describe('HooksSettingsManager', () => {
 
   describe('regenerateToken', () => {
     it('should generate a new token', () => {
-      mockSettings = { token: 'old-token' };
+      mockStoredSettings = { token: 'old-token' };
       HooksSettingsManager.clearCache();
 
       const newToken = HooksSettingsManager.regenerateToken();
@@ -249,7 +267,7 @@ describe('HooksSettingsManager', () => {
     });
 
     it('should remove a preset', () => {
-      mockSettings = { presets: ['gmail', 'slack'] };
+      mockStoredSettings = { presets: ['gmail', 'slack'] };
       HooksSettingsManager.clearCache();
 
       const settings = HooksSettingsManager.removePreset('gmail');
@@ -272,7 +290,7 @@ describe('HooksSettingsManager', () => {
     });
 
     it('should update a mapping by id', () => {
-      mockSettings = {
+      mockStoredSettings = {
         mappings: [{ id: 'test', action: 'agent' }],
       };
       HooksSettingsManager.clearCache();
@@ -293,7 +311,7 @@ describe('HooksSettingsManager', () => {
     });
 
     it('should remove a mapping by id', () => {
-      mockSettings = {
+      mockStoredSettings = {
         mappings: [
           { id: 'test1', action: 'agent' },
           { id: 'test2', action: 'wake' },
@@ -328,7 +346,7 @@ describe('HooksSettingsManager', () => {
     });
 
     it('should merge Gmail config with existing', () => {
-      mockSettings = {
+      mockStoredSettings = {
         gmail: { account: 'old@gmail.com', label: 'INBOX' },
       };
       HooksSettingsManager.clearCache();
@@ -342,7 +360,7 @@ describe('HooksSettingsManager', () => {
     });
 
     it('should get Gmail config with defaults', () => {
-      mockSettings = {
+      mockStoredSettings = {
         gmail: { account: 'test@gmail.com' },
       };
       HooksSettingsManager.clearCache();
@@ -362,28 +380,28 @@ describe('HooksSettingsManager', () => {
 
   describe('status checks', () => {
     it('should return true when properly configured', () => {
-      mockSettings = { enabled: true, token: 'test' };
+      mockStoredSettings = { enabled: true, token: 'test' };
       HooksSettingsManager.clearCache();
 
       expect(HooksSettingsManager.isConfigured()).toBe(true);
     });
 
     it('should return false when disabled', () => {
-      mockSettings = { enabled: false, token: 'test' };
+      mockStoredSettings = { enabled: false, token: 'test' };
       HooksSettingsManager.clearCache();
 
       expect(HooksSettingsManager.isConfigured()).toBe(false);
     });
 
     it('should return false when no token', () => {
-      mockSettings = { enabled: true, token: '' };
+      mockStoredSettings = { enabled: true, token: '' };
       HooksSettingsManager.clearCache();
 
       expect(HooksSettingsManager.isConfigured()).toBe(false);
     });
 
     it('should check Gmail configuration', () => {
-      mockSettings = {
+      mockStoredSettings = {
         gmail: {
           account: 'test@gmail.com',
           topic: 'projects/test/topics/test',
@@ -396,7 +414,7 @@ describe('HooksSettingsManager', () => {
     });
 
     it('should return false for incomplete Gmail config', () => {
-      mockSettings = {
+      mockStoredSettings = {
         gmail: { account: 'test@gmail.com' },
       };
       HooksSettingsManager.clearCache();
@@ -407,7 +425,7 @@ describe('HooksSettingsManager', () => {
 
   describe('getSettingsForDisplay', () => {
     it('should mask token', () => {
-      mockSettings = { token: 'secret-token' };
+      mockStoredSettings = { token: 'secret-token' };
       HooksSettingsManager.clearCache();
 
       const display = HooksSettingsManager.getSettingsForDisplay();
@@ -416,7 +434,7 @@ describe('HooksSettingsManager', () => {
     });
 
     it('should show empty string for missing token', () => {
-      mockSettings = { token: '' };
+      mockStoredSettings = { token: '' };
       HooksSettingsManager.clearCache();
 
       const display = HooksSettingsManager.getSettingsForDisplay();
@@ -425,7 +443,7 @@ describe('HooksSettingsManager', () => {
     });
 
     it('should mask Gmail push token', () => {
-      mockSettings = {
+      mockStoredSettings = {
         gmail: { pushToken: 'secret-push-token' },
       };
       HooksSettingsManager.clearCache();

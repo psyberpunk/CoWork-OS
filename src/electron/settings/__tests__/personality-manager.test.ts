@@ -4,58 +4,44 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-let mockSettings: Record<string, unknown> = {};
+let mockStoredSettings: Record<string, unknown> | undefined = undefined;
 let writeCount = 0;
-let tempFileContent: string = '';
 
-// Mock fs module
+const mockRepositorySave = vi.fn().mockImplementation((_category: string, settings: unknown) => {
+  mockStoredSettings = settings as Record<string, unknown>;
+  writeCount++;
+});
+const mockRepositoryLoad = vi.fn().mockImplementation(() => mockStoredSettings);
+const mockRepositoryExists = vi.fn().mockImplementation(() => mockStoredSettings !== undefined);
+
+// Mock SecureSettingsRepository
+vi.mock('../../database/SecureSettingsRepository', () => ({
+  SecureSettingsRepository: {
+    isInitialized: vi.fn().mockReturnValue(true),
+    getInstance: vi.fn().mockImplementation(() => ({
+      save: mockRepositorySave,
+      load: mockRepositoryLoad,
+      exists: mockRepositoryExists,
+    })),
+  },
+}));
+
+// Mock fs module (legacy migration path)
 vi.mock('fs', () => ({
   default: {
-    existsSync: vi.fn().mockImplementation((path: string) => {
-      if (path.includes('.tmp.')) return tempFileContent !== '';
-      return Object.keys(mockSettings).length > 0;
-    }),
-    readFileSync: vi.fn().mockImplementation(() => JSON.stringify(mockSettings)),
-    writeFileSync: vi.fn().mockImplementation((path: string, data: string) => {
-      if (path.includes('.tmp.')) {
-        tempFileContent = data;
-      } else {
-        mockSettings = JSON.parse(data);
-        writeCount++;
-      }
-    }),
-    renameSync: vi.fn().mockImplementation((_src: string, _dest: string) => {
-      // Atomic rename: move temp content to actual settings
-      if (tempFileContent) {
-        mockSettings = JSON.parse(tempFileContent);
-        tempFileContent = '';
-        writeCount++;
-      }
-    }),
+    existsSync: vi.fn().mockReturnValue(false),
+    readFileSync: vi.fn().mockReturnValue('{}'),
+    writeFileSync: vi.fn(),
+    renameSync: vi.fn(),
     unlinkSync: vi.fn(),
+    copyFileSync: vi.fn(),
   },
-  existsSync: vi.fn().mockImplementation((path: string) => {
-    if (path.includes('.tmp.')) return tempFileContent !== '';
-    return Object.keys(mockSettings).length > 0;
-  }),
-  readFileSync: vi.fn().mockImplementation(() => JSON.stringify(mockSettings)),
-  writeFileSync: vi.fn().mockImplementation((path: string, data: string) => {
-    if (path.includes('.tmp.')) {
-      tempFileContent = data;
-    } else {
-      mockSettings = JSON.parse(data);
-      writeCount++;
-    }
-  }),
-  renameSync: vi.fn().mockImplementation((_src: string, _dest: string) => {
-    // Atomic rename: move temp content to actual settings
-    if (tempFileContent) {
-      mockSettings = JSON.parse(tempFileContent);
-      tempFileContent = '';
-      writeCount++;
-    }
-  }),
+  existsSync: vi.fn().mockReturnValue(false),
+  readFileSync: vi.fn().mockReturnValue('{}'),
+  writeFileSync: vi.fn(),
+  renameSync: vi.fn(),
   unlinkSync: vi.fn(),
+  copyFileSync: vi.fn(),
 }));
 
 // Mock electron
@@ -71,9 +57,8 @@ import { PersonalityManager } from '../personality-manager';
 describe('PersonalityManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
+    mockStoredSettings = undefined;
     writeCount = 0;
-    tempFileContent = '';
     PersonalityManager.removeAllListeners();
     PersonalityManager.clearCache();
     PersonalityManager.initialize();
@@ -98,7 +83,7 @@ describe('PersonalityManager', () => {
     });
 
     it('should load existing settings', () => {
-      mockSettings = {
+      mockStoredSettings = {
         activePersonality: 'friendly',
         customPrompt: 'Be super helpful!',
         customName: 'My Bot',
@@ -113,10 +98,10 @@ describe('PersonalityManager', () => {
     });
 
     it('should cache loaded settings', () => {
-      mockSettings = { activePersonality: 'concise' };
+      mockStoredSettings = { activePersonality: 'concise' };
 
       const settings1 = PersonalityManager.loadSettings();
-      mockSettings = { activePersonality: 'creative' }; // Change mock
+      mockStoredSettings = { activePersonality: 'creative' }; // Change mock
       const settings2 = PersonalityManager.loadSettings();
 
       // Should return cached value
@@ -124,7 +109,7 @@ describe('PersonalityManager', () => {
     });
 
     it('should merge with defaults for missing fields', () => {
-      mockSettings = { activePersonality: 'technical' };
+      mockStoredSettings = { activePersonality: 'technical' };
 
       PersonalityManager.clearCache();
       const settings = PersonalityManager.loadSettings();
@@ -135,7 +120,7 @@ describe('PersonalityManager', () => {
     });
 
     it('should fall back to default for invalid personality id', () => {
-      mockSettings = { activePersonality: 'invalid-personality' };
+      mockStoredSettings = { activePersonality: 'invalid-personality' };
 
       PersonalityManager.clearCache();
       const settings = PersonalityManager.loadSettings();
@@ -153,8 +138,8 @@ describe('PersonalityManager', () => {
       PersonalityManager.saveSettings(settings);
 
       expect(writeCount).toBe(1);
-      expect(mockSettings.activePersonality).toBe('creative');
-      expect(mockSettings.customPrompt).toBe('Be creative!');
+      expect(mockStoredSettings.activePersonality).toBe('creative');
+      expect(mockStoredSettings.customPrompt).toBe('Be creative!');
     });
 
     it('should update cache after save', () => {
@@ -167,7 +152,7 @@ describe('PersonalityManager', () => {
     });
 
     it('should validate personality id on save and keep existing if invalid', () => {
-      mockSettings = { activePersonality: 'friendly' };
+      mockStoredSettings = { activePersonality: 'friendly' };
       PersonalityManager.clearCache();
 
       const settings = PersonalityManager.loadSettings();
@@ -175,10 +160,8 @@ describe('PersonalityManager', () => {
       settings.activePersonality = 'invalid';
       PersonalityManager.saveSettings(settings);
 
-      // The saveSettings validates and keeps existing value for invalid ids
-      // Note: Currently the code allows invalid values through, but validates on load
-      // This test documents the current behavior
-      expect(mockSettings.activePersonality).toBe('invalid');
+      // The saveSettings reads from the cached settings, so invalid values persist here
+      expect(mockStoredSettings.activePersonality).toBe('invalid');
     });
   });
 
@@ -194,13 +177,13 @@ describe('PersonalityManager', () => {
       PersonalityManager.setActivePersonality('friendly');
 
       expect(writeCount).toBe(1);
-      expect(mockSettings.activePersonality).toBe('friendly');
+      expect(mockStoredSettings.activePersonality).toBe('friendly');
     });
   });
 
   describe('getActivePersonality', () => {
     it('should return the active personality definition', () => {
-      mockSettings = { activePersonality: 'creative' };
+      mockStoredSettings = { activePersonality: 'creative' };
       PersonalityManager.clearCache();
 
       const personality = PersonalityManager.getActivePersonality();
@@ -211,7 +194,7 @@ describe('PersonalityManager', () => {
     });
 
     it('should return undefined for invalid personality', () => {
-      mockSettings = { activePersonality: 'invalid' };
+      mockStoredSettings = { activePersonality: 'invalid' };
       PersonalityManager.clearCache();
 
       // Since loadSettings falls back to professional, we need to test differently
@@ -223,7 +206,7 @@ describe('PersonalityManager', () => {
 
   describe('getPersonalityPrompt', () => {
     it('should return the prompt template for built-in personality', () => {
-      mockSettings = { activePersonality: 'concise' };
+      mockStoredSettings = { activePersonality: 'concise' };
       PersonalityManager.clearCache();
 
       const prompt = PersonalityManager.getPersonalityPrompt();
@@ -233,7 +216,7 @@ describe('PersonalityManager', () => {
     });
 
     it('should return custom prompt for custom personality', () => {
-      mockSettings = {
+      mockStoredSettings = {
         activePersonality: 'custom',
         customPrompt: 'Always respond in haiku format.',
       };
@@ -246,7 +229,7 @@ describe('PersonalityManager', () => {
     });
 
     it('should include response style preferences in prompt', () => {
-      mockSettings = {
+      mockStoredSettings = {
         activePersonality: 'custom',
         customPrompt: '',
       };
@@ -302,11 +285,11 @@ describe('PersonalityManager', () => {
 
   describe('clearCache', () => {
     it('should clear the cached settings', () => {
-      mockSettings = { activePersonality: 'creative' };
+      mockStoredSettings = { activePersonality: 'creative' };
       PersonalityManager.loadSettings();
 
       PersonalityManager.clearCache();
-      mockSettings = { activePersonality: 'technical' };
+      mockStoredSettings = { activePersonality: 'technical' };
 
       const settings = PersonalityManager.loadSettings();
       expect(settings.activePersonality).toBe('technical');
@@ -336,14 +319,14 @@ describe('PersonalityManager', () => {
 describe('PersonalityManager - personality prompt content', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
+    mockStoredSettings = {};
     writeCount = 0;
     PersonalityManager.clearCache();
     PersonalityManager.initialize();
   });
 
   it('professional personality should emphasize formal tone', () => {
-    mockSettings = { activePersonality: 'professional' };
+    mockStoredSettings = { activePersonality: 'professional' };
     PersonalityManager.clearCache();
 
     const prompt = PersonalityManager.getPersonalityPrompt();
@@ -353,7 +336,7 @@ describe('PersonalityManager - personality prompt content', () => {
   });
 
   it('friendly personality should emphasize warmth', () => {
-    mockSettings = { activePersonality: 'friendly' };
+    mockStoredSettings = { activePersonality: 'friendly' };
     PersonalityManager.clearCache();
 
     const prompt = PersonalityManager.getPersonalityPrompt();
@@ -363,7 +346,7 @@ describe('PersonalityManager - personality prompt content', () => {
   });
 
   it('concise personality should emphasize brevity', () => {
-    mockSettings = { activePersonality: 'concise' };
+    mockStoredSettings = { activePersonality: 'concise' };
     PersonalityManager.clearCache();
 
     const prompt = PersonalityManager.getPersonalityPrompt();
@@ -373,7 +356,7 @@ describe('PersonalityManager - personality prompt content', () => {
   });
 
   it('creative personality should emphasize imagination', () => {
-    mockSettings = { activePersonality: 'creative' };
+    mockStoredSettings = { activePersonality: 'creative' };
     PersonalityManager.clearCache();
 
     const prompt = PersonalityManager.getPersonalityPrompt();
@@ -383,7 +366,7 @@ describe('PersonalityManager - personality prompt content', () => {
   });
 
   it('technical personality should emphasize detail', () => {
-    mockSettings = { activePersonality: 'technical' };
+    mockStoredSettings = { activePersonality: 'technical' };
     PersonalityManager.clearCache();
 
     const prompt = PersonalityManager.getPersonalityPrompt();
@@ -393,7 +376,7 @@ describe('PersonalityManager - personality prompt content', () => {
   });
 
   it('casual personality should emphasize relaxed tone', () => {
-    mockSettings = { activePersonality: 'casual' };
+    mockStoredSettings = { activePersonality: 'casual' };
     PersonalityManager.clearCache();
 
     const prompt = PersonalityManager.getPersonalityPrompt();
@@ -406,7 +389,7 @@ describe('PersonalityManager - personality prompt content', () => {
 describe('PersonalityManager - agent name', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
+    mockStoredSettings = {};
     writeCount = 0;
     PersonalityManager.clearCache();
     PersonalityManager.initialize();
@@ -419,7 +402,7 @@ describe('PersonalityManager - agent name', () => {
     });
 
     it('should return custom name when set', () => {
-      mockSettings = { agentName: 'Jarvis' };
+      mockStoredSettings = { agentName: 'Jarvis' };
       PersonalityManager.clearCache();
 
       const name = PersonalityManager.getAgentName();
@@ -427,7 +410,7 @@ describe('PersonalityManager - agent name', () => {
     });
 
     it('should return default name for empty string', () => {
-      mockSettings = { agentName: '' };
+      mockStoredSettings = { agentName: '' };
       PersonalityManager.clearCache();
 
       const name = PersonalityManager.getAgentName();
@@ -440,25 +423,25 @@ describe('PersonalityManager - agent name', () => {
       PersonalityManager.setAgentName('Friday');
 
       expect(writeCount).toBe(1);
-      expect(mockSettings.agentName).toBe('Friday');
+      expect(mockStoredSettings.agentName).toBe('Friday');
     });
 
     it('should trim whitespace from name', () => {
       PersonalityManager.setAgentName('  Max  ');
 
-      expect(mockSettings.agentName).toBe('Max');
+      expect(mockStoredSettings.agentName).toBe('Max');
     });
 
     it('should use default name for empty input', () => {
       PersonalityManager.setAgentName('');
 
-      expect(mockSettings.agentName).toBe('CoWork');
+      expect(mockStoredSettings.agentName).toBe('CoWork');
     });
 
     it('should use default name for whitespace-only input', () => {
       PersonalityManager.setAgentName('   ');
 
-      expect(mockSettings.agentName).toBe('CoWork');
+      expect(mockStoredSettings.agentName).toBe('CoWork');
     });
   });
 
@@ -473,7 +456,7 @@ describe('PersonalityManager - agent name', () => {
     });
 
     it('should return identity prompt with custom name', () => {
-      mockSettings = { agentName: 'Jarvis' };
+      mockStoredSettings = { agentName: 'Jarvis' };
       PersonalityManager.clearCache();
 
       const prompt = PersonalityManager.getIdentityPrompt();
@@ -490,7 +473,7 @@ describe('PersonalityManager - agent name', () => {
     });
 
     it('should include user context when user name is set', () => {
-      mockSettings = {
+      mockStoredSettings = {
         relationship: {
           userName: 'Alice',
           tasksCompleted: 25,
@@ -508,7 +491,7 @@ describe('PersonalityManager - agent name', () => {
     });
 
     it('should include instructions for handling "who am I" when user name is set', () => {
-      mockSettings = { relationship: { userName: 'Bob' } };
+      mockStoredSettings = { relationship: { userName: 'Bob' } };
       PersonalityManager.clearCache();
 
       const prompt = PersonalityManager.getIdentityPrompt();
@@ -528,7 +511,7 @@ describe('PersonalityManager - agent name', () => {
 
   describe('agent name persistence', () => {
     it('should persist agent name with other settings', () => {
-      mockSettings = { activePersonality: 'friendly', agentName: 'Max' };
+      mockStoredSettings = { activePersonality: 'friendly', agentName: 'Max' };
       PersonalityManager.clearCache();
 
       const settings = PersonalityManager.loadSettings();
@@ -538,13 +521,13 @@ describe('PersonalityManager - agent name', () => {
     });
 
     it('should preserve agent name when changing personality', () => {
-      mockSettings = { agentName: 'Friday' };
+      mockStoredSettings = { agentName: 'Friday' };
       PersonalityManager.clearCache();
 
       PersonalityManager.setActivePersonality('creative');
 
-      expect(mockSettings.agentName).toBe('Friday');
-      expect(mockSettings.activePersonality).toBe('creative');
+      expect(mockStoredSettings.agentName).toBe('Friday');
+      expect(mockStoredSettings.activePersonality).toBe('creative');
     });
   });
 });
@@ -552,7 +535,7 @@ describe('PersonalityManager - agent name', () => {
 describe('PersonalityManager - personas', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
+    mockStoredSettings = {};
     writeCount = 0;
     PersonalityManager.clearCache();
     PersonalityManager.initialize();
@@ -562,7 +545,7 @@ describe('PersonalityManager - personas', () => {
     it('should return all persona definitions', () => {
       const personas = PersonalityManager.getPersonaDefinitions();
 
-      expect(personas).toHaveLength(10);
+      expect(personas).toHaveLength(11);
       expect(personas.map(p => p.id)).toContain('none');
       expect(personas.map(p => p.id)).toContain('jarvis');
       expect(personas.map(p => p.id)).toContain('friday');
@@ -573,6 +556,7 @@ describe('PersonalityManager - personas', () => {
       expect(personas.map(p => p.id)).toContain('sensei');
       expect(personas.map(p => p.id)).toContain('pirate');
       expect(personas.map(p => p.id)).toContain('noir');
+      expect(personas.map(p => p.id)).toContain('companion');
     });
 
     it('should include suggested names for personas', () => {
@@ -609,39 +593,39 @@ describe('PersonalityManager - personas', () => {
       PersonalityManager.setActivePersona('friday');
 
       expect(writeCount).toBe(1);
-      expect(mockSettings.activePersona).toBe('friday');
+      expect(mockStoredSettings.activePersona).toBe('friday');
     });
 
     it('should apply suggested name when no agent name is set', () => {
-      mockSettings = { agentName: '' };
+      mockStoredSettings = { agentName: '' };
       PersonalityManager.clearCache();
 
       PersonalityManager.setActivePersona('jarvis');
 
       // Note: the suggested name is only applied if agentName is falsy
       // Since empty string is falsy, it should apply
-      expect(mockSettings.agentName).toBe('Jarvis');
+      expect(mockStoredSettings.agentName).toBe('Jarvis');
     });
 
     it('should not override existing agent name', () => {
-      mockSettings = { agentName: 'MyBot' };
+      mockStoredSettings = { agentName: 'MyBot' };
       PersonalityManager.clearCache();
 
       PersonalityManager.setActivePersona('jarvis');
 
-      expect(mockSettings.agentName).toBe('MyBot');
+      expect(mockStoredSettings.agentName).toBe('MyBot');
     });
 
     it('should apply sample catchphrase when not set', () => {
       PersonalityManager.setActivePersona('jarvis');
 
-      expect((mockSettings.quirks as any)?.catchphrase).toBe('At your service.');
+      expect((mockStoredSettings.quirks as any)?.catchphrase).toBe('At your service.');
     });
 
     it('should apply sample sign-off when not set', () => {
       PersonalityManager.setActivePersona('jarvis');
 
-      expect((mockSettings.quirks as any)?.signOff).toBe('Will there be anything else?');
+      expect((mockStoredSettings.quirks as any)?.signOff).toBe('Will there be anything else?');
     });
 
     it('should not apply persona quirks when selecting none persona', () => {
@@ -649,14 +633,14 @@ describe('PersonalityManager - personas', () => {
 
       // When selecting 'none', no persona-specific quirks are applied
       // Default quirks may still exist from the settings merge
-      expect((mockSettings.quirks as any)?.catchphrase).toBeFalsy();
-      expect((mockSettings.quirks as any)?.signOff).toBeFalsy();
+      expect((mockStoredSettings.quirks as any)?.catchphrase).toBeFalsy();
+      expect((mockStoredSettings.quirks as any)?.signOff).toBeFalsy();
     });
   });
 
   describe('getActivePersona', () => {
     it('should return the active persona definition', () => {
-      mockSettings = { activePersona: 'pirate' };
+      mockStoredSettings = { activePersona: 'pirate' };
       PersonalityManager.clearCache();
 
       const persona = PersonalityManager.getActivePersona();
@@ -675,7 +659,7 @@ describe('PersonalityManager - personas', () => {
 
   describe('persona prompt integration', () => {
     it('should include persona prompt in getPersonalityPrompt', () => {
-      mockSettings = {
+      mockStoredSettings = {
         activePersonality: 'professional',
         activePersona: 'jarvis',
       };
@@ -688,7 +672,7 @@ describe('PersonalityManager - personas', () => {
     });
 
     it('should not include persona prompt for none persona', () => {
-      mockSettings = {
+      mockStoredSettings = {
         activePersonality: 'professional',
         activePersona: 'none',
       };
@@ -704,7 +688,7 @@ describe('PersonalityManager - personas', () => {
 describe('PersonalityManager - response style', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
+    mockStoredSettings = {};
     writeCount = 0;
     PersonalityManager.clearCache();
     PersonalityManager.initialize();
@@ -714,25 +698,25 @@ describe('PersonalityManager - response style', () => {
     it('should set emoji usage preference', () => {
       PersonalityManager.setResponseStyle({ emojiUsage: 'expressive' });
 
-      expect((mockSettings.responseStyle as any)?.emojiUsage).toBe('expressive');
+      expect((mockStoredSettings.responseStyle as any)?.emojiUsage).toBe('expressive');
     });
 
     it('should set response length preference', () => {
       PersonalityManager.setResponseStyle({ responseLength: 'detailed' });
 
-      expect((mockSettings.responseStyle as any)?.responseLength).toBe('detailed');
+      expect((mockStoredSettings.responseStyle as any)?.responseLength).toBe('detailed');
     });
 
     it('should set code comment style preference', () => {
       PersonalityManager.setResponseStyle({ codeCommentStyle: 'verbose' });
 
-      expect((mockSettings.responseStyle as any)?.codeCommentStyle).toBe('verbose');
+      expect((mockStoredSettings.responseStyle as any)?.codeCommentStyle).toBe('verbose');
     });
 
     it('should set explanation depth preference', () => {
       PersonalityManager.setResponseStyle({ explanationDepth: 'teaching' });
 
-      expect((mockSettings.responseStyle as any)?.explanationDepth).toBe('teaching');
+      expect((mockStoredSettings.responseStyle as any)?.explanationDepth).toBe('teaching');
     });
 
     it('should merge with existing response style', () => {
@@ -747,7 +731,7 @@ describe('PersonalityManager - response style', () => {
 
   describe('response style prompt generation', () => {
     it('should include emoji none instruction', () => {
-      mockSettings = {
+      mockStoredSettings = {
         responseStyle: { emojiUsage: 'none', responseLength: 'balanced', codeCommentStyle: 'moderate', explanationDepth: 'balanced' },
       };
       PersonalityManager.clearCache();
@@ -758,7 +742,7 @@ describe('PersonalityManager - response style', () => {
     });
 
     it('should include emoji expressive instruction', () => {
-      mockSettings = {
+      mockStoredSettings = {
         responseStyle: { emojiUsage: 'expressive', responseLength: 'balanced', codeCommentStyle: 'moderate', explanationDepth: 'balanced' },
       };
       PersonalityManager.clearCache();
@@ -769,7 +753,7 @@ describe('PersonalityManager - response style', () => {
     });
 
     it('should include terse response instruction', () => {
-      mockSettings = {
+      mockStoredSettings = {
         responseStyle: { emojiUsage: 'minimal', responseLength: 'terse', codeCommentStyle: 'moderate', explanationDepth: 'balanced' },
       };
       PersonalityManager.clearCache();
@@ -780,7 +764,7 @@ describe('PersonalityManager - response style', () => {
     });
 
     it('should include detailed response instruction', () => {
-      mockSettings = {
+      mockStoredSettings = {
         responseStyle: { emojiUsage: 'minimal', responseLength: 'detailed', codeCommentStyle: 'moderate', explanationDepth: 'balanced' },
       };
       PersonalityManager.clearCache();
@@ -791,7 +775,7 @@ describe('PersonalityManager - response style', () => {
     });
 
     it('should include expert explanation depth instruction', () => {
-      mockSettings = {
+      mockStoredSettings = {
         responseStyle: { emojiUsage: 'minimal', responseLength: 'balanced', codeCommentStyle: 'moderate', explanationDepth: 'expert' },
       };
       PersonalityManager.clearCache();
@@ -803,7 +787,7 @@ describe('PersonalityManager - response style', () => {
     });
 
     it('should include teaching explanation depth instruction', () => {
-      mockSettings = {
+      mockStoredSettings = {
         responseStyle: { emojiUsage: 'minimal', responseLength: 'balanced', codeCommentStyle: 'moderate', explanationDepth: 'teaching' },
       };
       PersonalityManager.clearCache();
@@ -818,7 +802,7 @@ describe('PersonalityManager - response style', () => {
 describe('PersonalityManager - quirks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
+    mockStoredSettings = {};
     writeCount = 0;
     PersonalityManager.clearCache();
     PersonalityManager.initialize();
@@ -828,19 +812,19 @@ describe('PersonalityManager - quirks', () => {
     it('should set catchphrase', () => {
       PersonalityManager.setQuirks({ catchphrase: 'Let me handle that!' });
 
-      expect((mockSettings.quirks as any)?.catchphrase).toBe('Let me handle that!');
+      expect((mockStoredSettings.quirks as any)?.catchphrase).toBe('Let me handle that!');
     });
 
     it('should set sign-off', () => {
       PersonalityManager.setQuirks({ signOff: 'Happy coding!' });
 
-      expect((mockSettings.quirks as any)?.signOff).toBe('Happy coding!');
+      expect((mockStoredSettings.quirks as any)?.signOff).toBe('Happy coding!');
     });
 
     it('should set analogy domain', () => {
       PersonalityManager.setQuirks({ analogyDomain: 'cooking' });
 
-      expect((mockSettings.quirks as any)?.analogyDomain).toBe('cooking');
+      expect((mockStoredSettings.quirks as any)?.analogyDomain).toBe('cooking');
     });
 
     it('should merge with existing quirks', () => {
@@ -855,7 +839,7 @@ describe('PersonalityManager - quirks', () => {
 
   describe('quirks prompt generation', () => {
     it('should include catchphrase in prompt', () => {
-      mockSettings = {
+      mockStoredSettings = {
         quirks: { catchphrase: 'Consider it done!', signOff: '', analogyDomain: 'none' },
       };
       PersonalityManager.clearCache();
@@ -867,7 +851,7 @@ describe('PersonalityManager - quirks', () => {
     });
 
     it('should include sign-off in prompt', () => {
-      mockSettings = {
+      mockStoredSettings = {
         quirks: { catchphrase: '', signOff: 'Stay awesome!', analogyDomain: 'none' },
       };
       PersonalityManager.clearCache();
@@ -878,7 +862,7 @@ describe('PersonalityManager - quirks', () => {
     });
 
     it('should include analogy domain in prompt', () => {
-      mockSettings = {
+      mockStoredSettings = {
         quirks: { catchphrase: '', signOff: '', analogyDomain: 'space' },
       };
       PersonalityManager.clearCache();
@@ -890,7 +874,7 @@ describe('PersonalityManager - quirks', () => {
     });
 
     it('should not include quirks section when all empty', () => {
-      mockSettings = {
+      mockStoredSettings = {
         quirks: { catchphrase: '', signOff: '', analogyDomain: 'none' },
       };
       PersonalityManager.clearCache();
@@ -905,7 +889,7 @@ describe('PersonalityManager - quirks', () => {
 describe('PersonalityManager - relationship', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
+    mockStoredSettings = {};
     writeCount = 0;
     PersonalityManager.clearCache();
     PersonalityManager.initialize();
@@ -915,25 +899,25 @@ describe('PersonalityManager - relationship', () => {
     it('should set the user name', () => {
       PersonalityManager.setUserName('Alice');
 
-      expect((mockSettings.relationship as any)?.userName).toBe('Alice');
+      expect((mockStoredSettings.relationship as any)?.userName).toBe('Alice');
     });
 
     it('should trim whitespace from name', () => {
       PersonalityManager.setUserName('  Bob  ');
 
-      expect((mockSettings.relationship as any)?.userName).toBe('Bob');
+      expect((mockStoredSettings.relationship as any)?.userName).toBe('Bob');
     });
 
     it('should set undefined for empty name', () => {
       PersonalityManager.setUserName('');
 
-      expect((mockSettings.relationship as any)?.userName).toBeUndefined();
+      expect((mockStoredSettings.relationship as any)?.userName).toBeUndefined();
     });
   });
 
   describe('getUserName', () => {
     it('should return the user name when set', () => {
-      mockSettings = { relationship: { userName: 'Charlie' } };
+      mockStoredSettings = { relationship: { userName: 'Charlie' } };
       PersonalityManager.clearCache();
 
       expect(PersonalityManager.getUserName()).toBe('Charlie');
@@ -949,54 +933,54 @@ describe('PersonalityManager - relationship', () => {
     it('should increment tasks completed', () => {
       PersonalityManager.recordTaskCompleted();
 
-      expect((mockSettings.relationship as any)?.tasksCompleted).toBe(1);
+      expect((mockStoredSettings.relationship as any)?.tasksCompleted).toBe(1);
     });
 
     it('should increment existing count', () => {
-      mockSettings = { relationship: { tasksCompleted: 5 } };
+      mockStoredSettings = { relationship: { tasksCompleted: 5 } };
       PersonalityManager.clearCache();
 
       PersonalityManager.recordTaskCompleted();
 
-      expect((mockSettings.relationship as any)?.tasksCompleted).toBe(6);
+      expect((mockStoredSettings.relationship as any)?.tasksCompleted).toBe(6);
     });
 
     it('should set first interaction timestamp on first task', () => {
       PersonalityManager.recordTaskCompleted();
 
-      expect((mockSettings.relationship as any)?.firstInteraction).toBeDefined();
-      expect(typeof (mockSettings.relationship as any)?.firstInteraction).toBe('number');
+      expect((mockStoredSettings.relationship as any)?.firstInteraction).toBeDefined();
+      expect(typeof (mockStoredSettings.relationship as any)?.firstInteraction).toBe('number');
     });
 
     it('should add workspace to projects worked on', () => {
       PersonalityManager.recordTaskCompleted('my-project');
 
-      expect((mockSettings.relationship as any)?.projectsWorkedOn).toContain('my-project');
+      expect((mockStoredSettings.relationship as any)?.projectsWorkedOn).toContain('my-project');
     });
 
     it('should not duplicate workspace names', () => {
       PersonalityManager.recordTaskCompleted('my-project');
       PersonalityManager.recordTaskCompleted('my-project');
 
-      expect((mockSettings.relationship as any)?.projectsWorkedOn).toHaveLength(1);
+      expect((mockStoredSettings.relationship as any)?.projectsWorkedOn).toHaveLength(1);
     });
 
     it('should update milestone when reached', () => {
       // Set tasksCompleted to 9 and lastMilestoneCelebrated to 1 (already celebrated milestone 1)
       // After incrementing to 10, milestone 10 should be celebrated
-      mockSettings = { relationship: { tasksCompleted: 9, lastMilestoneCelebrated: 1, projectsWorkedOn: [] } };
+      mockStoredSettings = { relationship: { tasksCompleted: 9, lastMilestoneCelebrated: 1, projectsWorkedOn: [] } };
       PersonalityManager.clearCache();
 
       PersonalityManager.recordTaskCompleted();
 
-      expect((mockSettings.relationship as any)?.lastMilestoneCelebrated).toBe(10);
+      expect((mockStoredSettings.relationship as any)?.lastMilestoneCelebrated).toBe(10);
     });
   });
 
   describe('getRelationshipStats', () => {
     it('should return stats with expected structure', () => {
       // Set explicit relationship data to test stats calculation
-      mockSettings = {
+      mockStoredSettings = {
         relationship: {
           tasksCompleted: 0,
           projectsWorkedOn: [],
@@ -1014,7 +998,7 @@ describe('PersonalityManager - relationship', () => {
     });
 
     it('should return correct task count', () => {
-      mockSettings = { relationship: { tasksCompleted: 42 } };
+      mockStoredSettings = { relationship: { tasksCompleted: 42 } };
       PersonalityManager.clearCache();
 
       const stats = PersonalityManager.getRelationshipStats();
@@ -1023,7 +1007,7 @@ describe('PersonalityManager - relationship', () => {
     });
 
     it('should return correct project count', () => {
-      mockSettings = { relationship: { projectsWorkedOn: ['proj1', 'proj2', 'proj3'] } };
+      mockStoredSettings = { relationship: { projectsWorkedOn: ['proj1', 'proj2', 'proj3'] } };
       PersonalityManager.clearCache();
 
       const stats = PersonalityManager.getRelationshipStats();
@@ -1032,7 +1016,7 @@ describe('PersonalityManager - relationship', () => {
     });
 
     it('should calculate next milestone correctly', () => {
-      mockSettings = { relationship: { tasksCompleted: 15 } };
+      mockStoredSettings = { relationship: { tasksCompleted: 15 } };
       PersonalityManager.clearCache();
 
       const stats = PersonalityManager.getRelationshipStats();
@@ -1041,7 +1025,7 @@ describe('PersonalityManager - relationship', () => {
     });
 
     it('should return null for next milestone when beyond all milestones', () => {
-      mockSettings = { relationship: { tasksCompleted: 1500 } };
+      mockStoredSettings = { relationship: { tasksCompleted: 1500 } };
       PersonalityManager.clearCache();
 
       const stats = PersonalityManager.getRelationshipStats();
@@ -1058,7 +1042,7 @@ describe('PersonalityManager - relationship', () => {
     });
 
     it('should return personalized greeting with user name', () => {
-      mockSettings = { relationship: { userName: 'David' } };
+      mockStoredSettings = { relationship: { userName: 'David' } };
       PersonalityManager.clearCache();
 
       const greeting = PersonalityManager.getGreeting();
@@ -1067,7 +1051,7 @@ describe('PersonalityManager - relationship', () => {
     });
 
     it('should return milestone message when milestone is reached', () => {
-      mockSettings = {
+      mockStoredSettings = {
         relationship: {
           userName: 'Eve',
           tasksCompleted: 10,
@@ -1084,7 +1068,7 @@ describe('PersonalityManager - relationship', () => {
 
   describe('identity prompt with user name', () => {
     it('should include user name in identity prompt', () => {
-      mockSettings = { relationship: { userName: 'Frank', tasksCompleted: 10 } };
+      mockStoredSettings = { relationship: { userName: 'Frank', tasksCompleted: 10 } };
       PersonalityManager.clearCache();
 
       const prompt = PersonalityManager.getIdentityPrompt();
@@ -1098,7 +1082,7 @@ describe('PersonalityManager - relationship', () => {
 describe('PersonalityManager - load settings with new fields', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
+    mockStoredSettings = {};
     writeCount = 0;
     PersonalityManager.clearCache();
     PersonalityManager.initialize();
@@ -1123,7 +1107,7 @@ describe('PersonalityManager - load settings with new fields', () => {
 
   it('should load relationship with defaults merged', () => {
     // Set explicit empty relationship to test default merging
-    mockSettings = {
+    mockStoredSettings = {
       relationship: {},
     };
     PersonalityManager.clearCache();
@@ -1143,7 +1127,7 @@ describe('PersonalityManager - load settings with new fields', () => {
   });
 
   it('should merge partial response style with defaults', () => {
-    mockSettings = {
+    mockStoredSettings = {
       responseStyle: { emojiUsage: 'expressive' },
     };
     PersonalityManager.clearCache();
@@ -1155,7 +1139,7 @@ describe('PersonalityManager - load settings with new fields', () => {
   });
 
   it('should validate persona id on load', () => {
-    mockSettings = { activePersona: 'invalid-persona' };
+    mockStoredSettings = { activePersona: 'invalid-persona' };
     PersonalityManager.clearCache();
 
     const settings = PersonalityManager.loadSettings();
@@ -1167,9 +1151,8 @@ describe('PersonalityManager - load settings with new fields', () => {
 describe('PersonalityManager - resetToDefaults', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
+    mockStoredSettings = {};
     writeCount = 0;
-    tempFileContent = '';
     PersonalityManager.removeAllListeners();
     PersonalityManager.clearCache();
     PersonalityManager.initialize();
@@ -1177,7 +1160,7 @@ describe('PersonalityManager - resetToDefaults', () => {
 
   it('should reset all settings to defaults', () => {
     // Set up custom settings
-    mockSettings = {
+    mockStoredSettings = {
       activePersonality: 'creative',
       agentName: 'Jarvis',
       activePersona: 'jarvis',
@@ -1188,13 +1171,13 @@ describe('PersonalityManager - resetToDefaults', () => {
 
     PersonalityManager.resetToDefaults(false);
 
-    expect(mockSettings.activePersonality).toBe('professional');
-    expect(mockSettings.agentName).toBe('CoWork');
-    expect(mockSettings.activePersona).toBe('none');
+    expect(mockStoredSettings.activePersonality).toBe('professional');
+    expect(mockStoredSettings.agentName).toBe('CoWork');
+    expect(mockStoredSettings.activePersona).toBe('none');
   });
 
   it('should preserve relationship data when preserveRelationship is true', () => {
-    mockSettings = {
+    mockStoredSettings = {
       activePersonality: 'creative',
       agentName: 'Jarvis',
       relationship: {
@@ -1207,13 +1190,13 @@ describe('PersonalityManager - resetToDefaults', () => {
 
     PersonalityManager.resetToDefaults(true);
 
-    expect(mockSettings.activePersonality).toBe('professional');
-    expect((mockSettings.relationship as any)?.userName).toBe('Alice');
-    expect((mockSettings.relationship as any)?.tasksCompleted).toBe(100);
+    expect(mockStoredSettings.activePersonality).toBe('professional');
+    expect((mockStoredSettings.relationship as any)?.userName).toBe('Alice');
+    expect((mockStoredSettings.relationship as any)?.tasksCompleted).toBe(100);
   });
 
   it('should not preserve relationship data when preserveRelationship is false', () => {
-    mockSettings = {
+    mockStoredSettings = {
       relationship: {
         userName: 'Alice',
         tasksCompleted: 100,
@@ -1223,12 +1206,12 @@ describe('PersonalityManager - resetToDefaults', () => {
 
     PersonalityManager.resetToDefaults(false);
 
-    expect((mockSettings.relationship as any)?.userName).toBeFalsy();
-    expect((mockSettings.relationship as any)?.tasksCompleted).toBe(0);
+    expect((mockStoredSettings.relationship as any)?.userName).toBeFalsy();
+    expect((mockStoredSettings.relationship as any)?.tasksCompleted).toBe(0);
   });
 
   it('should default to preserving relationship', () => {
-    mockSettings = {
+    mockStoredSettings = {
       relationship: {
         userName: 'Bob',
         tasksCompleted: 50,
@@ -1238,8 +1221,8 @@ describe('PersonalityManager - resetToDefaults', () => {
 
     PersonalityManager.resetToDefaults();
 
-    expect((mockSettings.relationship as any)?.userName).toBe('Bob');
-    expect((mockSettings.relationship as any)?.tasksCompleted).toBe(50);
+    expect((mockStoredSettings.relationship as any)?.userName).toBe('Bob');
+    expect((mockStoredSettings.relationship as any)?.tasksCompleted).toBe(50);
   });
 
   it('should increment write count', () => {
@@ -1252,9 +1235,8 @@ describe('PersonalityManager - resetToDefaults', () => {
 describe('PersonalityManager - event emission', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
+    mockStoredSettings = {};
     writeCount = 0;
-    tempFileContent = '';
     PersonalityManager.removeAllListeners();
     PersonalityManager.clearCache();
     PersonalityManager.initialize();
@@ -1332,9 +1314,8 @@ describe('PersonalityManager - event emission', () => {
 describe('PersonalityManager - initialization guard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
+    mockStoredSettings = {};
     writeCount = 0;
-    tempFileContent = '';
     PersonalityManager.removeAllListeners();
     PersonalityManager.clearCache();
     PersonalityManager.initialize();
@@ -1356,28 +1337,19 @@ describe('PersonalityManager - initialization guard', () => {
 describe('PersonalityManager - atomic writes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettings = {};
+    mockStoredSettings = {};
     writeCount = 0;
-    tempFileContent = '';
     PersonalityManager.removeAllListeners();
     PersonalityManager.clearCache();
     PersonalityManager.initialize();
   });
 
-  it('should use atomic write pattern (temp file + rename)', async () => {
-    const fs = await import('fs');
-
+  it('should persist settings via SecureSettingsRepository', () => {
     const settings = PersonalityManager.loadSettings();
     settings.activePersonality = 'creative';
     PersonalityManager.saveSettings(settings);
 
-    // Verify writeFileSync was called with a temp path
-    expect(fs.writeFileSync).toHaveBeenCalled();
-    const writeCalls = (fs.writeFileSync as any).mock.calls;
-    const tempWriteCall = writeCalls.find((call: any[]) => call[0].includes('.tmp.'));
-    expect(tempWriteCall).toBeDefined();
-
-    // Verify renameSync was called
-    expect(fs.renameSync).toHaveBeenCalled();
+    expect(writeCount).toBe(1);
+    expect((mockStoredSettings as any).activePersonality).toBe('creative');
   });
 });
