@@ -338,7 +338,7 @@ export function OnboardingModal({
       case 'openrouter':
         return 'anthropic/claude-3.5-sonnet';
       case 'bedrock':
-        return 'sonnet-4';
+        return 'sonnet-4-5';
       default:
         return 'sonnet-4';
     }

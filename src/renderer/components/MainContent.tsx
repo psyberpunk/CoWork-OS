@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria, CustomSkill, EventType, TEMP_WORKSPACE_ID } from '../../shared/types';
+import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria, CustomSkill, EventType, TEMP_WORKSPACE_ID, DEFAULT_QUIRKS } from '../../shared/types';
 import { useVoiceInput } from '../hooks/useVoiceInput';
+import { useAgentContext, type AgentContext } from '../hooks/useAgentContext';
+import { getMessage } from '../utils/agentMessages';
 
 // localStorage key for verbose mode
 const VERBOSE_STEPS_KEY = 'cowork:verboseSteps';
@@ -153,15 +155,51 @@ function MessageCopyButton({ text }: { text: string }) {
   );
 }
 
+// Global audio state to ensure only one audio plays at a time
+let currentAudioContext: AudioContext | null = null;
+let currentAudioSource: AudioBufferSourceNode | null = null;
+let currentSpeakingCallback: (() => void) | null = null;
+
+function stopCurrentAudio() {
+  if (currentAudioSource) {
+    try {
+      currentAudioSource.stop();
+    } catch {
+      // Already stopped
+    }
+    currentAudioSource = null;
+  }
+  if (currentAudioContext) {
+    try {
+      currentAudioContext.close();
+    } catch {
+      // Already closed
+    }
+    currentAudioContext = null;
+  }
+  if (currentSpeakingCallback) {
+    currentSpeakingCallback();
+    currentSpeakingCallback = null;
+  }
+}
+
 // Speak button for assistant messages
 function MessageSpeakButton({ text, voiceEnabled }: { text: string; voiceEnabled: boolean }) {
   const [speaking, setSpeaking] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSpeak = async () => {
+  const handleClick = async () => {
     if (!voiceEnabled) return;
 
+    // If already speaking, stop the audio
+    if (speaking) {
+      stopCurrentAudio();
+      setSpeaking(false);
+      return;
+    }
+
     try {
-      setSpeaking(true);
+      setLoading(true);
       // Strip markdown for cleaner speech
       const cleanText = text
         .replace(/```[\s\S]*?```/g, '') // Remove code blocks
@@ -175,12 +213,48 @@ function MessageSpeakButton({ text, voiceEnabled }: { text: string; voiceEnabled
         .trim();
 
       if (cleanText) {
-        await window.electronAPI.voiceSpeak(cleanText);
+        // Stop any currently playing audio first
+        stopCurrentAudio();
+
+        const result = await window.electronAPI.voiceSpeak(cleanText);
+        if (result.success && result.audioData) {
+          // Convert number array back to ArrayBuffer and play
+          const audioBuffer = new Uint8Array(result.audioData).buffer;
+          const audioContext = new AudioContext();
+          const decodedAudio = await audioContext.decodeAudioData(audioBuffer);
+          const source = audioContext.createBufferSource();
+          source.buffer = decodedAudio;
+          source.connect(audioContext.destination);
+
+          // Store references for stopping
+          currentAudioContext = audioContext;
+          currentAudioSource = source;
+          currentSpeakingCallback = () => setSpeaking(false);
+
+          source.onended = () => {
+            setSpeaking(false);
+            currentAudioContext = null;
+            currentAudioSource = null;
+            currentSpeakingCallback = null;
+            try {
+              audioContext.close();
+            } catch {
+              // Already closed
+            }
+          };
+
+          setLoading(false);
+          setSpeaking(true);
+          source.start(0);
+          return;
+        } else if (!result.success) {
+          console.error('TTS failed:', result.error);
+        }
       }
     } catch (err) {
       console.error('Failed to speak:', err);
     } finally {
-      setSpeaking(false);
+      setLoading(false);
     }
   };
 
@@ -189,14 +263,17 @@ function MessageSpeakButton({ text, voiceEnabled }: { text: string; voiceEnabled
   return (
     <button
       className={`message-speak-btn ${speaking ? 'speaking' : ''}`}
-      onClick={handleSpeak}
-      title={speaking ? 'Speaking...' : 'Speak message'}
-      disabled={speaking}
+      onClick={handleClick}
+      title={speaking ? 'Stop speaking' : loading ? 'Loading...' : 'Speak message'}
+      disabled={loading}
     >
       {speaking ? (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <rect x="6" y="4" width="4" height="16" rx="1" />
-          <rect x="14" y="4" width="4" height="16" rx="1" />
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2">
+          <rect x="4" y="4" width="16" height="16" rx="2" />
+        </svg>
+      ) : loading ? (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="spin">
+          <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="12" />
         </svg>
       ) : (
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -205,7 +282,7 @@ function MessageSpeakButton({ text, voiceEnabled }: { text: string; voiceEnabled
           <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
         </svg>
       )}
-      <span>{speaking ? 'Speaking' : 'Speak'}</span>
+      <span>{speaking ? 'Stop' : loading ? 'Loading' : 'Speak'}</span>
     </button>
   );
 }
@@ -433,7 +510,7 @@ interface GoalModeOptions {
   maxAttempts?: number;
 }
 
-type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'slack' | 'whatsapp' | 'teams' | 'morechannels' | 'updates' | 'guardrails' | 'queue' | 'skills';
+type SettingsTab = 'appearance' | 'llm' | 'search' | 'telegram' | 'slack' | 'whatsapp' | 'teams' | 'morechannels' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'voice';
 
 interface MainContentProps {
   task: Task | undefined;
@@ -473,6 +550,8 @@ interface CanvasSession {
 }
 
 export function MainContent({ task, selectedTaskId, workspace, events, onSendMessage, onCreateTask, onChangeWorkspace, onSelectWorkspace, onOpenSettings, onStopTask, selectedModel, availableModels, onModelChange }: MainContentProps) {
+  // Agent personality context for personalized messages
+  const agentContext = useAgentContext();
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
   const [inputValue, setInputValue] = useState('');
   // Shell permission state - tracks current workspace's shell permission
@@ -504,6 +583,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   const [selectedSkillForParams, setSelectedSkillForParams] = useState<CustomSkill | null>(null);
 
   // Voice input hook
+  const [showVoiceNotConfigured, setShowVoiceNotConfigured] = useState(false);
   const voiceInput = useVoiceInput({
     onTranscript: (text) => {
       // Append transcribed text to input
@@ -511,6 +591,9 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     },
     onError: (error) => {
       console.error('Voice input error:', error);
+    },
+    onNotConfigured: () => {
+      setShowVoiceNotConfigured(true);
     },
   });
   const [viewerFilePath, setViewerFilePath] = useState<string | null>(null);
@@ -862,6 +945,8 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   const mainBodyRef = useRef<HTMLDivElement>(null);
   const prevTaskStatusRef = useRef<Task['status'] | undefined>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const placeholderMeasureRef = useRef<HTMLSpanElement>(null);
+  const [cursorLeft, setCursorLeft] = useState<number>(0);
 
   // Auto-resize textarea as content changes
   const autoResizeTextarea = useCallback(() => {
@@ -876,6 +961,22 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   useEffect(() => {
     autoResizeTextarea();
   }, [inputValue, autoResizeTextarea]);
+
+  // Calculate cursor position based on placeholder text width
+  const placeholder = agentContext.getPlaceholder();
+  useEffect(() => {
+    if (placeholderMeasureRef.current) {
+      // Measure the placeholder text width
+      const measureEl = placeholderMeasureRef.current;
+      measureEl.textContent = placeholder;
+      // Get the width and add offset for: padding (16px) + prompt (~$ = ~24px) + gap (10px)
+      const padding = 16; // wrapper left padding
+      const promptWidth = 24; // ~$ prompt width
+      const gap = 10;
+      const textWidth = measureEl.offsetWidth;
+      setCursorLeft(padding + promptWidth + gap + textWidth);
+    }
+  }, [placeholder]);
 
   // Check if user is near the bottom of the scroll container
   const isNearBottom = useCallback((element: HTMLElement, threshold = 100) => {
@@ -1125,15 +1226,15 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
             <div className="cli-info">
               <div className="cli-line">
                 <span className="cli-prompt">$</span>
-                <span className="cli-text" title="Welcome to CoWork OS - let's get things done together">Welcome to CoWork OS - let's get things done together</span>
+                <span className="cli-text" title={agentContext.getMessage('welcome')}>{agentContext.getMessage('welcome')}</span>
+              </div>
+              <div className="cli-line cli-line-secondary">
+                <span className="cli-prompt">&gt;</span>
+                <span className="cli-text">{agentContext.getMessage('welcomeSubtitle')}</span>
               </div>
               <div className="cli-line cli-line-disclosure">
                 <span className="cli-prompt">#</span>
-                <span className="cli-text cli-text-muted" title="You are interacting with an AI system. Responses are generated by AI models.">You are interacting with an AI system. Responses are generated by AI models.</span>
-              </div>
-              <div className="cli-line">
-                <span className="cli-prompt">$</span>
-                <span className="cli-text" title="What should we work on? Type below or pick a quick start">What should we work on? Type below or pick a quick start</span>
+                <span className="cli-text cli-text-muted" title={agentContext.getMessage('disclaimer')}>{agentContext.getMessage('disclaimer')}</span>
               </div>
             </div>
 
@@ -1179,49 +1280,48 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
 
             {/* Input Area */}
             <div className="welcome-input-container cli-input-container">
+              {showVoiceNotConfigured && (
+                <div className="voice-not-configured-banner">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
+                  </svg>
+                  <span>Voice input is not configured.</span>
+                  <button
+                    className="voice-settings-link"
+                    onClick={() => {
+                      setShowVoiceNotConfigured(false);
+                      onOpenSettings?.('voice');
+                    }}
+                  >
+                    Open Voice Settings
+                  </button>
+                  <button
+                    className="voice-banner-close"
+                    onClick={() => setShowVoiceNotConfigured(false)}
+                    title="Dismiss"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              )}
               <div className="cli-input-wrapper">
                 <span className="cli-input-prompt">~$</span>
+                <span ref={placeholderMeasureRef} className="cli-placeholder-measure" aria-hidden="true" />
                 <textarea
                   ref={textareaRef}
                   className="welcome-input cli-input input-textarea"
-                  placeholder="What should we work on together?"
+                  placeholder={placeholder}
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}
                   rows={1}
                 />
-                <button
-                  className={`voice-input-btn welcome-voice-btn ${voiceInput.state}`}
-                  onClick={voiceInput.toggleRecording}
-                  disabled={voiceInput.state === 'processing'}
-                  title={
-                    voiceInput.state === 'idle' ? 'Start voice input' :
-                    voiceInput.state === 'recording' ? 'Stop recording' :
-                    'Processing...'
-                  }
-                >
-                  {voiceInput.state === 'processing' ? (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="voice-processing-spin">
-                      <circle cx="12" cy="12" r="10" />
-                      <path d="M12 6v6l4 2" />
-                    </svg>
-                  ) : voiceInput.state === 'recording' ? (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                      <rect x="6" y="6" width="12" height="12" rx="2" />
-                    </svg>
-                  ) : (
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                      <line x1="12" y1="19" x2="12" y2="23" />
-                      <line x1="8" y1="23" x2="16" y2="23" />
-                    </svg>
-                  )}
-                  {voiceInput.state === 'recording' && (
-                    <span className="voice-recording-indicator" style={{ width: `${voiceInput.audioLevel}%` }} />
-                  )}
-                </button>
-                <span className="cli-cursor"></span>
+                {!inputValue && <span className="cli-cursor" style={{ left: cursorLeft }} />}
               </div>
 
               {/* Goal Mode Options */}
@@ -1404,6 +1504,37 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                     )}
                   </div>
                   <button
+                    className={`voice-input-btn ${voiceInput.state}`}
+                    onClick={voiceInput.toggleRecording}
+                    disabled={voiceInput.state === 'processing'}
+                    title={
+                      voiceInput.state === 'idle' ? 'Start voice input' :
+                      voiceInput.state === 'recording' ? 'Stop recording' :
+                      'Processing...'
+                    }
+                  >
+                    {voiceInput.state === 'processing' ? (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="voice-processing-spin">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 6v6l4 2" />
+                      </svg>
+                    ) : voiceInput.state === 'recording' ? (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <rect x="6" y="6" width="12" height="12" rx="2" />
+                      </svg>
+                    ) : (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="23" />
+                        <line x1="8" y1="23" x2="16" y2="23" />
+                      </svg>
+                    )}
+                    {voiceInput.state === 'recording' && (
+                      <span className="voice-recording-indicator" style={{ width: `${voiceInput.audioLevel}%` }} />
+                    )}
+                  </button>
+                  <button
                     className="lets-go-btn lets-go-btn-sm"
                     onClick={handleSend}
                     disabled={!inputValue.trim()}
@@ -1448,6 +1579,8 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     ? `${baseTitle}...`
     : baseTitle;
   const headerTooltip = isTitleTruncated ? trimmedPrompt : baseTitle;
+  const latestPauseEvent = [...events].reverse().find(event => event.type === 'task_paused');
+  const latestApprovalEvent = [...events].reverse().find(event => event.type === 'approval_requested');
 
   // Task view
   return (
@@ -1460,6 +1593,31 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
       {/* Body */}
       <div className="main-body" ref={mainBodyRef} onScroll={handleScroll}>
         <div className="task-content">
+          {task.status === 'paused' && (
+            <div className="task-status-banner task-status-banner-paused">
+              <div className="task-status-banner-content">
+                <strong>Paused — waiting on your input</strong>
+                {latestPauseEvent?.payload?.message && (
+                  <span className="task-status-banner-detail">{latestPauseEvent.payload.message}</span>
+                )}
+              </div>
+              <button className="btn-secondary" onClick={() => window.electronAPI.resumeTask(task.id)}>
+                Resume
+              </button>
+            </div>
+          )}
+
+          {task.status === 'blocked' && (
+            <div className="task-status-banner task-status-banner-blocked">
+              <div className="task-status-banner-content">
+                <strong>Blocked — needs approval</strong>
+                {latestApprovalEvent?.payload?.approval?.description && (
+                  <span className="task-status-banner-detail">{latestApprovalEvent.payload.approval.description}</span>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* User Prompt - Right aligned like chat */}
           <div className="chat-message user-message">
             <div className="chat-bubble user-bubble markdown-content">
@@ -1551,14 +1709,16 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                         <div className="chat-bubble assistant-bubble">
                           {isLastAssistant && (
                             <div className="chat-bubble-header">
-                              {task.status === 'completed' && <span className="chat-status">✅ All done!</span>}
+                              {task.status === 'completed' && <span className="chat-status">{agentContext.getMessage('taskComplete')}</span>}
+                              {task.status === 'paused' && <span className="chat-status">{agentContext.getMessage('taskPaused') || 'Paused'}</span>}
+                              {task.status === 'blocked' && <span className="chat-status">{agentContext.getMessage('taskBlocked') || 'Needs approval'}</span>}
                               {task.status === 'executing' && (
                                 <span className="chat-status executing">
                                   <svg className="spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                     <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
                                     <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
                                   </svg>
-                                  Working on it...
+                                  {agentContext.getMessage('taskWorking')}
                                 </span>
                               )}
                             </div>
@@ -1589,7 +1749,8 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                 }
 
                 // Technical events - only show when showSteps is true
-                if (!showSteps) {
+                const alwaysVisibleEvents = new Set(['approval_requested', 'approval_granted', 'approval_denied']);
+                if (!showSteps && !alwaysVisibleEvents.has(event.type)) {
                   // Even if we're not showing steps, we may still need to render CommandOutput here
                   if (shouldRenderCommandOutput) {
                     return (
@@ -1628,7 +1789,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                                 <path d="M9 18l6-6-6-6" />
                               </svg>
                             )}
-                            <div className="event-title">{renderEventTitle(event, workspace?.path, setViewerFilePath)}</div>
+                            <div className="event-title">{renderEventTitle(event, workspace?.path, setViewerFilePath, agentContext)}</div>
                           </div>
                           <div className="event-time">{formatTime(event.timestamp)}</div>
                         </div>
@@ -1686,11 +1847,40 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
               </button>
             </div>
           )}
+          {showVoiceNotConfigured && (
+            <div className="voice-not-configured-banner">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+              <span>Voice input is not configured.</span>
+              <button
+                className="voice-settings-link"
+                onClick={() => {
+                  setShowVoiceNotConfigured(false);
+                  onOpenSettings?.('voice');
+                }}
+              >
+                Open Voice Settings
+              </button>
+              <button
+                className="voice-banner-close"
+                onClick={() => setShowVoiceNotConfigured(false)}
+                title="Dismiss"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          )}
           <div className="input-row">
             <textarea
               ref={textareaRef}
               className="input-field input-textarea"
-              placeholder={queuedMessage ? "Message queued..." : "What's next?"}
+              placeholder={queuedMessage ? "Message queued..." : agentContext.getMessage('placeholderActive')}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -1733,6 +1923,16 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                   <span className="voice-recording-indicator" style={{ width: `${voiceInput.audioLevel}%` }} />
                 )}
               </button>
+              <button
+                className="lets-go-btn lets-go-btn-sm"
+                onClick={handleSend}
+                disabled={!inputValue.trim()}
+                title="Send message"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 19V5M5 12l7-7 7 7" />
+                </svg>
+              </button>
               {task.status === 'executing' && onStopTask && (
                 <button
                   className="stop-btn-simple"
@@ -1760,7 +1960,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
           </div>
         </div>
         <div className="footer-disclaimer">
-          AI can make mistakes. Please double-check responses.
+          {agentContext.getMessage('disclaimer')}
         </div>
       </div>
 
@@ -1803,19 +2003,35 @@ function truncateForDisplay(text: string, maxLength: number = 2000): string {
 function renderEventTitle(
   event: TaskEvent,
   workspacePath?: string,
-  onOpenViewer?: (path: string) => void
+  onOpenViewer?: (path: string) => void,
+  agentCtx?: AgentContext
 ): React.ReactNode {
+  // Build message context for personalized messages
+  const msgCtx = agentCtx ? {
+    agentName: agentCtx.agentName,
+    userName: agentCtx.userName,
+    personality: agentCtx.personality,
+    emojiUsage: agentCtx.emojiUsage,
+    quirks: agentCtx.quirks,
+  } : {
+    agentName: 'CoWork',
+    userName: undefined,
+    personality: 'professional' as const,
+    emojiUsage: 'minimal' as const,
+    quirks: DEFAULT_QUIRKS,
+  };
+
   switch (event.type) {
     case 'task_created':
-      return 'Session started';
+      return getMessage('taskStart', msgCtx);
     case 'task_completed':
-      return '✓ All done!';
+      return getMessage('taskComplete', msgCtx);
     case 'plan_created':
-      return 'Here\'s our approach';
+      return getMessage('planCreated', msgCtx);
     case 'step_started':
-      return `Working on: ${event.payload.step?.description || 'Getting started...'}`;
+      return getMessage('stepStarted', msgCtx, event.payload.step?.description || 'Getting started...');
     case 'step_completed':
-      return `✓ ${event.payload.step?.description || event.payload.message || 'Done'}`;
+      return getMessage('stepCompleted', msgCtx, event.payload.step?.description || event.payload.message);
     case 'tool_call':
       return `Using: ${event.payload.tool}`;
     case 'tool_result': {
@@ -1848,7 +2064,7 @@ function renderEventTitle(
       return `${event.payload.tool} ${status}${detail}`;
     }
     case 'assistant_message':
-      return 'CoWork';
+      return msgCtx.agentName;
     case 'file_created':
       return (
         <span>
@@ -1864,20 +2080,20 @@ function renderEventTitle(
     case 'file_deleted':
       return `Removed: ${event.payload.path}`;
     case 'error':
-      return 'Hit a snag';
+      return getMessage('error', msgCtx);
     case 'approval_requested':
-      return `Need your input: ${event.payload.approval?.description}`;
+      return `${getMessage('approval', msgCtx)} ${event.payload.approval?.description}`;
     case 'log':
       return event.payload.message;
     // Goal Mode verification events
     case 'verification_started':
-      return 'Checking our work...';
+      return getMessage('verifying', msgCtx);
     case 'verification_passed':
-      return `Verified! (attempt ${event.payload.attempt})`;
+      return `${getMessage('verifyPassed', msgCtx)} (attempt ${event.payload.attempt})`;
     case 'verification_failed':
-      return `Not quite right (attempt ${event.payload.attempt}/${event.payload.maxAttempts})`;
+      return `${getMessage('verifyFailed', msgCtx)} (attempt ${event.payload.attempt}/${event.payload.maxAttempts})`;
     case 'retry_started':
-      return `Let's try again (attempt ${event.payload.attempt}/${event.payload.maxAttempts})`;
+      return getMessage('retrying', msgCtx, String(event.payload.attempt));
     default:
       return event.type;
   }

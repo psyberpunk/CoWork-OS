@@ -34,7 +34,7 @@ export const ACCENT_COLORS: { id: AccentColor; label: string }[] = [
   { id: 'coral', label: 'Coral' },
 ];
 
-export type TaskStatus = 'pending' | 'queued' | 'planning' | 'executing' | 'paused' | 'completed' | 'failed' | 'cancelled';
+export type TaskStatus = 'pending' | 'queued' | 'planning' | 'executing' | 'paused' | 'blocked' | 'completed' | 'failed' | 'cancelled';
 
 /**
  * Reason for command termination - used to signal the agent why a command ended
@@ -72,6 +72,8 @@ export type EventType =
   | 'verification_failed'
   | 'retry_started'
   | 'task_cancelled'
+  | 'task_paused'
+  | 'task_resumed'
   | 'task_queued'
   | 'task_dequeued'
   | 'queue_updated'
@@ -2996,6 +2998,8 @@ export interface PersonalitySettings {
   quirks?: PersonalityQuirks;
   /** Relationship and history data */
   relationship?: RelationshipData;
+  /** Work style preference from onboarding - affects planning behavior */
+  workStyle?: 'planner' | 'flexible';
 }
 
 /**
