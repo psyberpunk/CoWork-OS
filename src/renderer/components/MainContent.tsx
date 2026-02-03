@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'rea
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
-import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria, CustomSkill, EventType, TEMP_WORKSPACE_ID, DEFAULT_QUIRKS } from '../../shared/types';
+import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria, CustomSkill, EventType, TEMP_WORKSPACE_ID, DEFAULT_QUIRKS, CanvasSession } from '../../shared/types';
+import type { AgentRoleData } from '../../electron/preload';
 import { useVoiceInput } from '../hooks/useVoiceInput';
 import { useAgentContext, type AgentContext } from '../hooks/useAgentContext';
 import { getMessage } from '../utils/agentMessages';
@@ -47,6 +48,18 @@ const buildTaskTitle = (text: string): string => {
   }
   return `${trimmed.slice(0, TASK_TITLE_MAX_LENGTH)}...`;
 };
+
+type MentionOption = {
+  type: 'agent' | 'everyone';
+  id: string;
+  label: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+};
+
+const normalizeMentionSearch = (value: string): string =>
+  value.toLowerCase().replace(/[^a-z0-9]/g, '');
 import { ApprovalDialog } from './ApprovalDialog';
 import { SkillParameterModal } from './SkillParameterModal';
 import { FileViewer } from './FileViewer';
@@ -540,23 +553,16 @@ interface ActiveCommand {
   startTimestamp: number; // When the command started, for positioning in timeline
 }
 
-// Canvas session type
-interface CanvasSession {
-  id: string;
-  taskId: string;
-  workspaceId: string;
-  sessionDir: string;
-  status: 'active' | 'paused' | 'closed';
-  title?: string;
-  createdAt: number;
-  lastUpdatedAt: number;
-}
-
 export function MainContent({ task, selectedTaskId, workspace, events, onSendMessage, onCreateTask, onChangeWorkspace, onSelectWorkspace, onOpenSettings, onStopTask, selectedModel, availableModels, onModelChange }: MainContentProps) {
   // Agent personality context for personalized messages
   const agentContext = useAgentContext();
   const [pendingApproval, setPendingApproval] = useState<ApprovalRequest | null>(null);
   const [inputValue, setInputValue] = useState('');
+  const [agentRoles, setAgentRoles] = useState<AgentRoleData[]>([]);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionTarget, setMentionTarget] = useState<{ start: number; end: number } | null>(null);
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionSelectedIndex, setMentionSelectedIndex] = useState(0);
   // Shell permission state - tracks current workspace's shell permission
   const [shellEnabled, setShellEnabled] = useState(workspace?.permissions?.shell ?? false);
   // Active command execution state
@@ -623,6 +629,68 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     // Command output is rendered separately via CommandOutput component
     return visibleEvents.filter(event => event.type !== 'command_output');
   }, [events, verboseSteps]);
+
+  const latestUserMessageTimestamp = useMemo(() => {
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === 'user_message') {
+        return events[i].timestamp;
+      }
+    }
+    return null;
+  }, [events]);
+
+  const latestCanvasSessionId = useMemo(() => {
+    if (canvasSessions.length === 0) return null;
+    const eligibleSessions = latestUserMessageTimestamp
+      ? canvasSessions.filter(session => session.createdAt >= latestUserMessageTimestamp)
+      : canvasSessions;
+    const pool = eligibleSessions.length > 0 ? eligibleSessions : canvasSessions;
+    return pool.reduce((latest, session) => {
+      return session.createdAt > latest.createdAt ? session : latest;
+    }, pool[0]).id;
+  }, [canvasSessions, latestUserMessageTimestamp]);
+
+  const timelineItems = useMemo(() => {
+    const eventItems = filteredEvents.map((event, index) => ({
+      kind: 'event' as const,
+      event,
+      eventIndex: index,
+      timestamp: event.timestamp,
+    }));
+
+    const freezeBefore = latestUserMessageTimestamp;
+    const canvasItems = canvasSessions
+      .map((session) => ({
+        kind: 'canvas' as const,
+        session,
+        timestamp: session.createdAt,
+        forceSnapshot: Boolean(
+          (freezeBefore && session.createdAt < freezeBefore) ||
+          (latestCanvasSessionId && session.id !== latestCanvasSessionId)
+        ),
+      }))
+      .sort((a, b) => a.timestamp - b.timestamp);
+
+    if (canvasItems.length === 0) return eventItems;
+
+    const merged: Array<typeof eventItems[number] | typeof canvasItems[number]> = [];
+    let canvasIndex = 0;
+
+    for (const eventItem of eventItems) {
+      while (canvasIndex < canvasItems.length && canvasItems[canvasIndex].timestamp <= eventItem.timestamp) {
+        merged.push(canvasItems[canvasIndex]);
+        canvasIndex += 1;
+      }
+      merged.push(eventItem);
+    }
+
+    while (canvasIndex < canvasItems.length) {
+      merged.push(canvasItems[canvasIndex]);
+      canvasIndex += 1;
+    }
+
+    return merged;
+  }, [filteredEvents, canvasSessions, latestCanvasSessionId, latestUserMessageTimestamp]);
 
   // Find the index where command output should be inserted (after the last event before command started)
   const commandOutputInsertIndex = useMemo(() => {
@@ -730,6 +798,13 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
       .catch(err => console.error('Failed to load custom skills:', err));
   }, []);
 
+  // Load active agent roles for @mention autocomplete
+  useEffect(() => {
+    window.electronAPI.getAgentRoles()
+      .then((roles) => setAgentRoles(roles.filter((role) => role.isActive)))
+      .catch(err => console.error('Failed to load agent roles:', err));
+  }, []);
+
   // Load canvas sessions when task changes
   useEffect(() => {
     if (!task?.id) {
@@ -769,9 +844,14 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
             })
             .catch(err => console.error('Failed to get canvas session:', err));
         } else if (event.type === 'session_updated' && event.session) {
-          setCanvasSessions(prev =>
-            prev.map(s => s.id === event.sessionId ? event.session! : s)
-          );
+          const updatedSession = event.session;
+          setCanvasSessions(prev => {
+            const exists = prev.some(s => s.id === event.sessionId);
+            if (!exists && updatedSession.status !== 'closed') {
+              return [...prev, updatedSession];
+            }
+            return prev.map(s => s.id === event.sessionId ? updatedSession : s);
+          });
         } else if (event.type === 'session_closed') {
           setCanvasSessions(prev => prev.filter(s => s.id !== event.sessionId));
         }
@@ -947,6 +1027,8 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   const mainBodyRef = useRef<HTMLDivElement>(null);
   const prevTaskStatusRef = useRef<Task['status'] | undefined>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mentionContainerRef = useRef<HTMLDivElement>(null);
+  const mentionDropdownRef = useRef<HTMLDivElement>(null);
   const placeholderMeasureRef = useRef<HTMLSpanElement>(null);
   const [cursorLeft, setCursorLeft] = useState<number>(0);
 
@@ -1163,6 +1245,9 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
         onSendMessage(inputValue.trim());
       }
       setInputValue('');
+      setMentionOpen(false);
+      setMentionQuery('');
+      setMentionTarget(null);
     }
   };
 
@@ -1170,7 +1255,191 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
     setQueuedMessage(null);
   };
 
+  const findMentionAtCursor = (value: string, cursor: number | null) => {
+    if (cursor === null) return null;
+    const uptoCursor = value.slice(0, cursor);
+    const atIndex = uptoCursor.lastIndexOf('@');
+    if (atIndex === -1) return null;
+    if (atIndex > 0 && /[a-zA-Z0-9]/.test(uptoCursor[atIndex - 1])) {
+      return null;
+    }
+    const query = uptoCursor.slice(atIndex + 1);
+    if (query.startsWith(' ')) return null;
+    if (query.includes('\n') || query.includes('\r')) return null;
+    return { query, start: atIndex, end: cursor };
+  };
+
+  const mentionOptions = useMemo<MentionOption[]>(() => {
+    if (!mentionOpen) return [];
+    const query = normalizeMentionSearch(mentionQuery);
+    const options: MentionOption[] = [];
+    const includeEveryone = query.length > 0 && ['everybody', 'everyone', 'all'].some((alias) => alias.startsWith(query));
+    if (includeEveryone) {
+      options.push({
+        type: 'everyone',
+        id: 'everyone',
+        label: 'Everybody',
+        description: 'Auto-pick the best agents for this task',
+        icon: '👥',
+        color: '#64748b',
+      });
+    }
+
+    const filteredAgents = agentRoles
+      .filter((role) => role.isActive)
+      .filter((role) => {
+        if (!query) return true;
+        const haystacks = [role.displayName, role.name, role.description ?? ''];
+        return haystacks.some((text) => normalizeMentionSearch(text).includes(query));
+      })
+      .sort((a, b) => {
+        if (a.sortOrder !== b.sortOrder) {
+          return (a.sortOrder ?? 0) - (b.sortOrder ?? 0);
+        }
+        return a.displayName.localeCompare(b.displayName);
+      });
+
+    filteredAgents.forEach((role) => {
+      options.push({
+        type: 'agent',
+        id: role.id,
+        label: role.displayName,
+        description: role.description,
+        icon: role.icon,
+        color: role.color,
+      });
+    });
+
+    return options;
+  }, [mentionOpen, mentionQuery, agentRoles]);
+
+  useEffect(() => {
+    if (mentionSelectedIndex >= mentionOptions.length) {
+      setMentionSelectedIndex(0);
+    }
+  }, [mentionOptions, mentionSelectedIndex]);
+
+  useEffect(() => {
+    if (!mentionOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (mentionContainerRef.current && !mentionContainerRef.current.contains(e.target as Node)) {
+        setMentionOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [mentionOpen]);
+
+  const updateMentionState = useCallback((value: string, cursor: number | null) => {
+    const mention = findMentionAtCursor(value, cursor);
+    if (!mention) {
+      setMentionOpen(false);
+      setMentionQuery('');
+      setMentionTarget(null);
+      return;
+    }
+    setMentionOpen(true);
+    setMentionQuery(mention.query);
+    setMentionTarget({ start: mention.start, end: mention.end });
+    setMentionSelectedIndex(0);
+  }, []);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setInputValue(value);
+    updateMentionState(value, e.target.selectionStart);
+  };
+
+  const handleInputClick = (e: React.MouseEvent<HTMLTextAreaElement>) => {
+    updateMentionState(inputValue, e.currentTarget.selectionStart);
+  };
+
+  const handleInputKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) {
+      updateMentionState(inputValue, (e.currentTarget as HTMLTextAreaElement).selectionStart);
+    }
+  };
+
+  const handleMentionSelect = (option: MentionOption) => {
+    if (!mentionTarget) return;
+    const insertText = option.type === 'everyone' ? '@everybody' : `@${option.label}`;
+    const before = inputValue.slice(0, mentionTarget.start);
+    const after = inputValue.slice(mentionTarget.end);
+    const needsSpace = after.length === 0 ? true : !after.startsWith(' ');
+    const nextValue = `${before}${insertText}${needsSpace ? ' ' : ''}${after}`;
+    setInputValue(nextValue);
+    setMentionOpen(false);
+    setMentionQuery('');
+    setMentionTarget(null);
+
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (textarea) {
+        const cursorPosition = before.length + insertText.length + (needsSpace ? 1 : 0);
+        textarea.focus();
+        textarea.setSelectionRange(cursorPosition, cursorPosition);
+      }
+    });
+  };
+
+  const renderMentionDropdown = () => {
+    if (!mentionOpen || mentionOptions.length === 0) return null;
+    return (
+      <div className="mention-autocomplete-dropdown" ref={mentionDropdownRef}>
+        {mentionOptions.map((option, index) => {
+          const displayLabel = option.type === 'everyone' ? '@everybody' : `@${option.label}`;
+          return (
+            <button
+              key={`${option.type}-${option.id}`}
+              className={`mention-autocomplete-item ${index === mentionSelectedIndex ? 'selected' : ''}`}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                handleMentionSelect(option);
+              }}
+              onMouseEnter={() => setMentionSelectedIndex(index)}
+            >
+              <span
+                className="mention-autocomplete-icon"
+                style={{ backgroundColor: option.color || '#64748b' }}
+              >
+                {option.icon || '👥'}
+              </span>
+              <div className="mention-autocomplete-details">
+                <span className="mention-autocomplete-name">{displayLabel}</span>
+                {option.description && (
+                  <span className="mention-autocomplete-desc">{option.description}</span>
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (mentionOpen && mentionOptions.length > 0) {
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          setMentionSelectedIndex((prev) => (prev + 1) % mentionOptions.length);
+          return;
+        case 'ArrowUp':
+          e.preventDefault();
+          setMentionSelectedIndex((prev) => (prev - 1 + mentionOptions.length) % mentionOptions.length);
+          return;
+        case 'Enter':
+        case 'Tab':
+          e.preventDefault();
+          handleMentionSelect(mentionOptions[mentionSelectedIndex]);
+          return;
+        case 'Escape':
+          e.preventDefault();
+          setMentionOpen(false);
+          return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -1314,15 +1583,20 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
               <div className="cli-input-wrapper">
                 <span className="cli-input-prompt">~$</span>
                 <span ref={placeholderMeasureRef} className="cli-placeholder-measure" aria-hidden="true" />
-                <textarea
-                  ref={textareaRef}
-                  className="welcome-input cli-input input-textarea"
-                  placeholder={placeholder}
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  rows={1}
-                />
+                <div className="mention-autocomplete-wrapper" ref={mentionContainerRef}>
+                  <textarea
+                    ref={textareaRef}
+                    className="welcome-input cli-input input-textarea"
+                    placeholder={placeholder}
+                    value={inputValue}
+                    onChange={handleInputChange}
+                    onKeyDown={handleKeyDown}
+                    onClick={handleInputClick}
+                    onKeyUp={handleInputKeyUp}
+                    rows={1}
+                  />
+                  {renderMentionDropdown()}
+                </div>
                 {!inputValue && <span className="cli-cursor" style={{ left: cursorLeft }} />}
               </div>
 
@@ -1643,17 +1917,29 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                   onClose={handleDismissCommandOutput}
                 />
               )}
-              {filteredEvents.map((event, index) => {
+              {timelineItems.map((item) => {
+                if (item.kind === 'canvas') {
+                  return (
+                    <CanvasPreview
+                      key={item.session.id}
+                      session={item.session}
+                      onClose={() => handleCanvasClose(item.session.id)}
+                      forceSnapshot={item.forceSnapshot}
+                    />
+                  );
+                }
+
+                const event = item.event;
                 const isUserMessage = event.type === 'user_message';
                 const isAssistantMessage = event.type === 'assistant_message';
                 // Check if CommandOutput should be rendered after this event
-                const shouldRenderCommandOutput = activeCommand && index === commandOutputInsertIndex;
+                const shouldRenderCommandOutput = activeCommand && item.eventIndex === commandOutputInsertIndex;
 
                 // Render user messages as chat bubbles on the right
                 if (isUserMessage) {
                   const messageText = event.payload?.message || 'User message';
                   return (
-                    <Fragment key={event.id || `event-${index}`}>
+                    <Fragment key={event.id || `event-${item.eventIndex}`}>
                       <div className="chat-message user-message">
                         <div className="chat-bubble user-bubble markdown-content">
                           <ReactMarkdown remarkPlugins={userMarkdownPlugins} components={markdownComponents}>
@@ -1681,7 +1967,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                   const messageText = event.payload?.message || '';
                   const isLastAssistant = event === lastAssistantMessage;
                   return (
-                    <Fragment key={event.id || `event-${index}`}>
+                    <Fragment key={event.id || `event-${item.eventIndex}`}>
                       <div className="chat-message assistant-message">
                         <div className="chat-bubble assistant-bubble">
                           {isLastAssistant && (
@@ -1731,7 +2017,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                   // Even if we're not showing steps, we may still need to render CommandOutput here
                   if (shouldRenderCommandOutput) {
                     return (
-                      <Fragment key={event.id || `event-${index}`}>
+                      <Fragment key={event.id || `event-${item.eventIndex}`}>
                         <CommandOutput
                           command={activeCommand.command}
                           output={activeCommand.output}
@@ -1750,7 +2036,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                 const isExpanded = isEventExpanded(event);
 
                 return (
-                  <Fragment key={event.id || `event-${index}`}>
+                  <Fragment key={event.id || `event-${item.eventIndex}`}>
                     <div className="timeline-event">
                       <div className="event-indicator">
                         <div className={`event-dot ${getEventDotClass(event.type)}`} />
@@ -1789,18 +2075,6 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
             </div>
           )}
 
-          {/* Live Canvas Previews - shown when canvas sessions are active */}
-          {canvasSessions.length > 0 && (
-            <div className="canvas-previews-container">
-              {canvasSessions.map(session => (
-                <CanvasPreview
-                  key={session.id}
-                  session={session}
-                  onClose={() => handleCanvasClose(session.id)}
-                />
-              ))}
-            </div>
-          )}
         </div>
       </div>
 
@@ -1877,15 +2151,20 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
             </div>
           )}
           <div className="input-row">
-            <textarea
-              ref={textareaRef}
-              className="input-field input-textarea"
-              placeholder={queuedMessage ? "Message queued..." : agentContext.getMessage('placeholderActive')}
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleKeyDown}
-              rows={1}
-            />
+            <div className="mention-autocomplete-wrapper" ref={mentionContainerRef}>
+              <textarea
+                ref={textareaRef}
+                className="input-field input-textarea"
+                placeholder={queuedMessage ? agentContext.getUiCopy('inputPlaceholderQueued') : agentContext.getMessage('placeholderActive')}
+                value={inputValue}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyDown}
+                onClick={handleInputClick}
+                onKeyUp={handleInputKeyUp}
+                rows={1}
+              />
+              {renderMentionDropdown()}
+            </div>
             <div className="input-actions">
               <ModelDropdown
                 models={availableModels}
@@ -2011,12 +2290,14 @@ function renderEventTitle(
     agentName: agentCtx.agentName,
     userName: agentCtx.userName,
     personality: agentCtx.personality,
+    persona: agentCtx.persona,
     emojiUsage: agentCtx.emojiUsage,
     quirks: agentCtx.quirks,
   } : {
     agentName: 'CoWork',
     userName: undefined,
     personality: 'professional' as const,
+    persona: undefined,
     emojiUsage: 'minimal' as const,
     quirks: DEFAULT_QUIRKS,
   };
