@@ -653,7 +653,7 @@ describe('PersonalityManager - personas', () => {
     it('should return none persona when not set', () => {
       const persona = PersonalityManager.getActivePersona();
 
-      expect(persona?.id).toBe('none');
+      expect(persona?.id).toBe('companion');
     });
   });
 
@@ -1123,7 +1123,7 @@ describe('PersonalityManager - load settings with new fields', () => {
   it('should load default persona', () => {
     const settings = PersonalityManager.loadSettings();
 
-    expect(settings.activePersona).toBe('none');
+    expect(settings.activePersona).toBe('companion');
   });
 
   it('should merge partial response style with defaults', () => {
@@ -1144,7 +1144,7 @@ describe('PersonalityManager - load settings with new fields', () => {
 
     const settings = PersonalityManager.loadSettings();
 
-    expect(settings.activePersona).toBe('none');
+    expect(settings.activePersona).toBe('companion');
   });
 });
 
@@ -1173,7 +1173,7 @@ describe('PersonalityManager - resetToDefaults', () => {
 
     expect(mockStoredSettings.activePersonality).toBe('professional');
     expect(mockStoredSettings.agentName).toBe('CoWork');
-    expect(mockStoredSettings.activePersona).toBe('none');
+    expect(mockStoredSettings.activePersona).toBe('companion');
   });
 
   it('should preserve relationship data when preserveRelationship is true', () => {

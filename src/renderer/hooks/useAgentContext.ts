@@ -7,7 +7,7 @@ import {
   DEFAULT_QUIRKS,
   DEFAULT_RESPONSE_STYLE,
 } from '../../shared/types';
-import { getMessage, getRandomPlaceholder, type MessageKey, type AgentMessageContext } from '../utils/agentMessages';
+import { getMessage, getRandomPlaceholder, getUiCopy, type MessageKey, type UiCopyKey, type AgentMessageContext } from '../utils/agentMessages';
 
 /**
  * Agent context returned by the hook
@@ -29,6 +29,7 @@ export interface AgentContext {
   // Helper methods
   getMessage: (key: MessageKey, detail?: string) => string;
   getPlaceholder: () => string;
+  getUiCopy: (key: UiCopyKey, replacements?: Record<string, string | number>) => string;
   formatWithNames: (template: string) => string;
 
   // Refresh settings
@@ -93,15 +94,22 @@ export function useAgentContext(): AgentContext {
       agentName,
       userName,
       personality,
+      persona,
       emojiUsage,
       quirks,
     }),
-    [agentName, userName, personality, emojiUsage, quirks]
+    [agentName, userName, personality, persona, emojiUsage, quirks]
   );
 
   // getMessage helper
   const getMessageFn = useCallback(
     (key: MessageKey, detail?: string) => getMessage(key, messageContext, detail),
+    [messageContext]
+  );
+
+  const getUiCopyFn = useCallback(
+    (key: UiCopyKey, replacements?: Record<string, string | number>) =>
+      getUiCopy(key, messageContext, replacements),
     [messageContext]
   );
 
@@ -136,6 +144,7 @@ export function useAgentContext(): AgentContext {
     isLoading,
     getMessage: getMessageFn,
     getPlaceholder: getPlaceholderFn,
+    getUiCopy: getUiCopyFn,
     formatWithNames,
     refresh: loadSettings,
   };

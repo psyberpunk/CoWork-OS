@@ -44,7 +44,7 @@ const DEFAULT_SETTINGS: PersonalitySettings = {
   customPrompt: '',
   customName: 'Custom Assistant',
   agentName: DEFAULT_AGENT_NAME,
-  activePersona: 'none',
+  activePersona: 'companion',
   responseStyle: DEFAULT_RESPONSE_STYLE,
   quirks: DEFAULT_QUIRKS,
   relationship: DEFAULT_RELATIONSHIP,
