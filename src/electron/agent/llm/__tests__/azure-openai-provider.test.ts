@@ -97,6 +97,33 @@ describe('AzureOpenAIProvider', () => {
     expect(secondBody.max_completion_tokens).toBe(10);
   });
 
+  it('falls back to Responses API when chat completions are unsupported during connection test', async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        createErrorResponse(400, 'Bad Request', {
+          error: {
+            message: 'The chatCompletion operation does not work with the specified model.',
+          },
+        })
+      )
+      .mockResolvedValueOnce(createOkResponse({ output: [] }));
+
+    const provider = new AzureOpenAIProvider(baseConfig);
+    const result = await provider.testConnection();
+
+    expect(result).toEqual({ success: true });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    const [firstUrl] = mockFetch.mock.calls[0];
+    const [secondUrl, secondOptions] = mockFetch.mock.calls[1];
+    expect(firstUrl).toContain('/chat/completions?api-version=2024-05-01');
+    expect(secondUrl).toBe('https://example.openai.azure.com/openai/v1/responses');
+
+    const body = JSON.parse(secondOptions.body);
+    expect(body.max_output_tokens).toBe(10);
+    expect(body.input[0].content[0].text).toBe('Hi');
+  });
+
   it('sends model requests and parses responses', async () => {
     mockFetch.mockResolvedValue(
       createOkResponse({
@@ -122,6 +149,44 @@ describe('AzureOpenAIProvider', () => {
     const [, options] = mockFetch.mock.calls[0];
     const body = JSON.parse(options.body);
     expect(body.model).toBe('gpt-4o');
+  });
+
+  it('falls back to Responses API when chat completions are unsupported', async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        createErrorResponse(400, 'Bad Request', {
+          error: {
+            message: 'The chatCompletion operation does not work with the specified model.',
+          },
+        })
+      )
+      .mockResolvedValueOnce(
+        createOkResponse({
+          output: [{ type: 'message', content: [{ type: 'output_text', text: 'hello' }] }],
+          usage: { input_tokens: 2, output_tokens: 3 },
+        })
+      );
+
+    const provider = new AzureOpenAIProvider(baseConfig);
+    const request: LLMRequest = {
+      model: 'gpt-5.2-codex',
+      maxTokens: 20,
+      system: 'system prompt',
+      messages: [{ role: 'user', content: 'hi' }],
+    };
+
+    const response = await provider.createMessage(request);
+
+    expect(response.content).toEqual([{ type: 'text', text: 'hello' }]);
+    expect(response.stopReason).toBe('end_turn');
+    expect(response.usage).toEqual({ inputTokens: 2, outputTokens: 3 });
+
+    const [responsesUrl, responsesOptions] = mockFetch.mock.calls[1];
+    expect(responsesUrl).toBe('https://example.openai.azure.com/openai/v1/responses');
+    const body = JSON.parse(responsesOptions.body);
+    expect(body.instructions).toBe('system prompt');
+    expect(body.model).toBe('gpt-5.2-codex');
+    expect(body.input[0].content[0].text).toBe('hi');
   });
 
   it('throws a descriptive error on API failures', async () => {
