@@ -156,12 +156,23 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
             <pre>{JSON.stringify(event.payload.result, null, 2)}</pre>
           </div>
         );
-      case 'error':
+      case 'error': {
+        const errorMessage = event.payload.error || event.payload.message;
+        const actionHint = event.payload.actionHint;
         return (
           <div className="event-details error">
-            {event.payload.error || event.payload.message}
+            <div>{errorMessage}</div>
+            {actionHint?.type === 'open_settings' && (
+              <button
+                className="button-primary button-small"
+                onClick={() => window.dispatchEvent(new CustomEvent('open-settings'))}
+              >
+                {actionHint.label || 'Open Settings'}
+              </button>
+            )}
           </div>
         );
+      }
       case 'task_cancelled':
         return (
           <div className="event-details cancelled">

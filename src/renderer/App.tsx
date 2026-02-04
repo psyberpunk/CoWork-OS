@@ -113,6 +113,15 @@ export function App() {
     loadLLMConfig();
   }, []);
 
+  useEffect(() => {
+    const handler = () => {
+      setSettingsTab('llm');
+      setCurrentView('settings');
+    };
+    window.addEventListener('open-settings', handler as EventListener);
+    return () => window.removeEventListener('open-settings', handler as EventListener);
+  }, []);
+
   // Load appearance settings on mount
   useEffect(() => {
     const loadAppearanceSettings = async () => {

@@ -234,10 +234,8 @@ export class ToolRegistry {
       allTools.push(...this.getShellToolDefinitions());
     }
 
-    // Only add image tools if Gemini API is configured
-    if (ImageTools.isAvailable()) {
-      allTools.push(...ImageTools.getToolDefinitions());
-    }
+    // Always add image tools; they will surface setup guidance if API keys are missing
+    allTools.push(...ImageTools.getToolDefinitions());
 
     // Always add system tools (they enable broader system interaction)
     allTools.push(...SystemTools.getToolDefinitions());
@@ -558,15 +556,13 @@ Shell Commands:
 - run_command: Execute shell commands (requires user approval)`;
     }
 
-    // Add image generation if Gemini is configured
-    if (ImageTools.isAvailable()) {
-      descriptions += `
+    descriptions += `
 
 Image Generation (Nano Banana):
 - generate_image: Generate images from text descriptions using AI
   - nano-banana: Fast generation for quick iterations
-  - nano-banana-pro: High-quality generation for production use`;
-    }
+  - nano-banana-pro: High-quality generation for production use
+  - Requires Gemini API key; the tool will prompt setup guidance if missing.`;
 
     // System tools are always available
     descriptions += `
@@ -1133,13 +1129,14 @@ ${skillDescriptions}`;
     }
 
     // Return full skill definition (useful for duplication/modification)
+    const promptWithBaseDir = skillLoader.expandBaseDir(skill.prompt, skill);
     return {
       success: true,
       skill: {
         id: skill.id,
         name: skill.name,
         description: skill.description,
-        prompt: skill.prompt,
+        prompt: promptWithBaseDir,
         icon: skill.icon,
         category: skill.category,
         priority: skill.priority,

@@ -64,9 +64,19 @@ export class ImageTools {
         });
       }
     } else {
-      this.daemon.logEvent(this.taskId, 'error', {
+      const payload: Record<string, any> = {
         action: 'generate_image',
         error: result.error,
+      };
+      if (result.error?.includes('Gemini API key not configured')) {
+        payload.actionHint = {
+          type: 'open_settings',
+          label: 'Set up Gemini API key',
+          target: 'gemini',
+        };
+      }
+      this.daemon.logEvent(this.taskId, 'error', {
+        ...payload,
       });
     }
 
