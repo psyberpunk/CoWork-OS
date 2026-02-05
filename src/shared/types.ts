@@ -2,10 +2,12 @@
 
 // Theme and Appearance types
 export type ThemeMode = 'light' | 'dark' | 'system';
+export type VisualTheme = 'terminal' | 'warm' | 'oblivion';
 export type AccentColor = 'cyan' | 'blue' | 'purple' | 'pink' | 'rose' | 'orange' | 'green' | 'teal' | 'coral';
 
 export interface AppearanceSettings {
   themeMode: ThemeMode;
+  visualTheme: VisualTheme;
   accentColor: AccentColor;
   disclaimerAccepted?: boolean;
   onboardingCompleted?: boolean;
@@ -443,6 +445,7 @@ export interface Workspace {
   name: string;
   path: string;
   createdAt: number;
+  lastUsedAt?: number;
   permissions: WorkspacePermissions;
   isTemp?: boolean;  // True for the auto-created temp workspace
 }
@@ -1285,6 +1288,7 @@ export const IPC_CHANNELS = {
   WORKSPACE_LIST: 'workspace:list',
   WORKSPACE_CREATE: 'workspace:create',
   WORKSPACE_UPDATE_PERMISSIONS: 'workspace:updatePermissions',
+  WORKSPACE_TOUCH: 'workspace:touch',
   WORKSPACE_GET_TEMP: 'workspace:getTemp',  // Get or create temp workspace
 
   // Approval operations
@@ -2483,7 +2487,7 @@ export interface SkillsConfig {
 
 // ============ Notification Types ============
 
-export type NotificationType = 'task_completed' | 'task_failed' | 'scheduled_task' | 'info' | 'warning' | 'error';
+export type NotificationType = 'task_completed' | 'task_failed' | 'scheduled_task' | 'input_required' | 'info' | 'warning' | 'error';
 
 export interface AppNotification {
   id: string;
