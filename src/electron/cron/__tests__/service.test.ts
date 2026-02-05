@@ -472,6 +472,7 @@ describe('CronService', () => {
         expect.objectContaining({
           prompt: 'Run this task',
           workspaceId: 'ws-1',
+          allowUserInput: false,
         })
       );
     });

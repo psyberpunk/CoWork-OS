@@ -486,6 +486,7 @@ export class CronService {
         prompt: job.taskPrompt,
         workspaceId: job.workspaceId,
         modelKey: job.modelKey,
+        allowUserInput: false,
       });
 
       taskId = result.id;

@@ -244,6 +244,34 @@ describe('TaskExecutor executeStep failure handling', () => {
     });
   });
 
+  it('does not pause when user input is disabled for the task', async () => {
+    executor = createExecutorWithStubs(
+      [
+        textResponse('1) Who is the primary user?\n2) What is the core flow?\n3) List 3 must-have features.'),
+      ],
+      {}
+    );
+    (executor as any).shouldPauseForQuestions = false;
+
+    const step: any = { id: '3b', description: 'Clarify requirements', status: 'pending' };
+
+    await (executor as any).executeStep(step);
+
+    expect(step.status).toBe('completed');
+  });
+
+  it('skips workspace preflight pauses when user input is disabled', () => {
+    executor = createExecutorWithStubs([textResponse('done')], {});
+    (executor as any).shouldPauseForQuestions = false;
+    (executor as any).classifyWorkspaceNeed = vi.fn().mockReturnValue('needs_existing');
+    (executor as any).pauseForUserInput = vi.fn();
+
+    const shouldPause = (executor as any).preflightWorkspaceCheck();
+
+    expect(shouldPause).toBe(false);
+    expect((executor as any).pauseForUserInput).not.toHaveBeenCalled();
+  });
+
   it('does not fail step when only web_search errors occur after a successful tool', async () => {
     executor = createExecutorWithStubs(
       [

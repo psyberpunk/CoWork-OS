@@ -182,10 +182,15 @@ app.whenReady().then(async () => {
         // secret: 'your-secret-here', // Uncomment and set for secure webhooks
       },
       createTask: async (params) => {
+        const allowUserInput = params.allowUserInput ?? false;
         const task = await agentDaemon.createTask({
           title: params.title,
           prompt: params.prompt,
           workspaceId: params.workspaceId,
+          agentConfig: {
+            ...(params.modelKey ? { modelKey: params.modelKey } : {}),
+            allowUserInput,
+          },
         });
         return { id: task.id };
       },

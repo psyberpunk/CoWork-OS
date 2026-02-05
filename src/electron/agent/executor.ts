@@ -1097,8 +1097,9 @@ export class TaskExecutor {
   ) {
     this.lastUserMessage = task.prompt;
     this.requiresTestRun = this.detectTestRequirement(`${task.title}\n${task.prompt}`);
-    // Only main tasks should pause for user input. Sub/parallel tasks should complete and report back.
-    this.shouldPauseForQuestions = !task.parentTaskId && (task.agentType ?? 'main') === 'main';
+    const allowUserInput = task.agentConfig?.allowUserInput ?? true;
+    // Only interactive main tasks should pause for user input.
+    this.shouldPauseForQuestions = allowUserInput && !task.parentTaskId && (task.agentType ?? 'main') === 'main';
     // Get base settings
     const settings = LLMProviderFactory.loadSettings();
 
@@ -2590,6 +2591,10 @@ You are continuing a previous conversation. The context from the previous conver
   }
 
   private preflightWorkspaceCheck(): boolean {
+    if (!this.shouldPauseForQuestions) {
+      return false;
+    }
+
     const workspaceNeed = this.classifyWorkspaceNeed(this.task.prompt);
     if (workspaceNeed === 'none') return false;
 
