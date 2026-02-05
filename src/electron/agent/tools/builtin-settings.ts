@@ -123,6 +123,8 @@ const TOOL_CATEGORIES: Record<string, keyof BuiltinToolsSettings['categories']> 
   box_action: 'webfetch',
   onedrive_action: 'webfetch',
   google_drive_action: 'webfetch',
+  gmail_action: 'webfetch',
+  calendar_action: 'webfetch',
   dropbox_action: 'webfetch',
   sharepoint_action: 'webfetch',
   // Browser tools

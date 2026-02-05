@@ -22,6 +22,8 @@ import { NotionTools } from './notion-tools';
 import { BoxTools } from './box-tools';
 import { OneDriveTools } from './onedrive-tools';
 import { GoogleDriveTools } from './google-drive-tools';
+import { GmailTools } from './gmail-tools';
+import { GoogleCalendarTools } from './google-calendar-tools';
 import { DropboxTools } from './dropbox-tools';
 import { SharePointTools } from './sharepoint-tools';
 import { LLMTool } from '../llm/types';
@@ -58,6 +60,8 @@ export class ToolRegistry {
   private boxTools: BoxTools;
   private oneDriveTools: OneDriveTools;
   private googleDriveTools: GoogleDriveTools;
+  private gmailTools: GmailTools;
+  private googleCalendarTools: GoogleCalendarTools;
   private dropboxTools: DropboxTools;
   private sharePointTools: SharePointTools;
   private gatewayContext?: GatewayContextType;
@@ -88,6 +92,8 @@ export class ToolRegistry {
     this.boxTools = new BoxTools(workspace, daemon, taskId);
     this.oneDriveTools = new OneDriveTools(workspace, daemon, taskId);
     this.googleDriveTools = new GoogleDriveTools(workspace, daemon, taskId);
+    this.gmailTools = new GmailTools(workspace, daemon, taskId);
+    this.googleCalendarTools = new GoogleCalendarTools(workspace, daemon, taskId);
     this.dropboxTools = new DropboxTools(workspace, daemon, taskId);
     this.sharePointTools = new SharePointTools(workspace, daemon, taskId);
     this.gatewayContext = gatewayContext;
@@ -124,6 +130,8 @@ export class ToolRegistry {
     this.boxTools.setWorkspace(workspace);
     this.oneDriveTools.setWorkspace(workspace);
     this.googleDriveTools.setWorkspace(workspace);
+    this.gmailTools.setWorkspace(workspace);
+    this.googleCalendarTools.setWorkspace(workspace);
     this.dropboxTools.setWorkspace(workspace);
     this.sharePointTools.setWorkspace(workspace);
   }
@@ -217,6 +225,16 @@ export class ToolRegistry {
     // Only add Google Drive tool if integration is enabled
     if (GoogleDriveTools.isEnabled()) {
       allTools.push(...this.getGoogleDriveToolDefinitions());
+    }
+
+    // Only add Gmail tool if integration is enabled
+    if (GmailTools.isEnabled()) {
+      allTools.push(...this.getGmailToolDefinitions());
+    }
+
+    // Only add Google Calendar tool if integration is enabled
+    if (GoogleCalendarTools.isEnabled()) {
+      allTools.push(...this.getGoogleCalendarToolDefinitions());
     }
 
     // Only add Dropbox tool if integration is enabled
@@ -686,6 +704,12 @@ ${skillDescriptions}`;
 
     // Google Drive tools
     if (name === 'google_drive_action') return await this.googleDriveTools.executeAction(input);
+
+    // Gmail tools
+    if (name === 'gmail_action') return await this.gmailTools.executeAction(input);
+
+    // Google Calendar tools
+    if (name === 'calendar_action') return await this.googleCalendarTools.executeAction(input);
 
     // Dropbox tools
     if (name === 'dropbox_action') return await this.dropboxTools.executeAction(input);
@@ -2455,6 +2479,204 @@ ${skillDescriptions}`;
             file_path: {
               type: 'string',
               description: 'Workspace-relative path to upload (for upload_file)',
+            },
+          },
+          required: ['action'],
+        },
+      },
+    ];
+  }
+
+  /**
+   * Define Gmail tools
+   */
+  private getGmailToolDefinitions(): LLMTool[] {
+    return [
+      {
+        name: 'gmail_action',
+        description:
+          'Use the connected Gmail account to search, read, and send messages. ' +
+          'Write actions (send/trash) require user approval.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: [
+                'get_profile',
+                'list_messages',
+                'get_message',
+                'get_thread',
+                'list_labels',
+                'send_message',
+                'trash_message',
+              ],
+              description: 'Action to perform',
+            },
+            query: {
+              type: 'string',
+              description: 'Gmail search query (for list_messages)',
+            },
+            page_size: {
+              type: 'number',
+              description: 'Max results (for list_messages)',
+            },
+            page_token: {
+              type: 'string',
+              description: 'Pagination token (for list_messages)',
+            },
+            label_ids: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Label IDs filter (for list_messages)',
+            },
+            include_spam_trash: {
+              type: 'boolean',
+              description: 'Include spam/trash (for list_messages)',
+            },
+            message_id: {
+              type: 'string',
+              description: 'Message ID (for get_message/trash_message)',
+            },
+            thread_id: {
+              type: 'string',
+              description: 'Thread ID (for get_thread/send_message)',
+            },
+            format: {
+              type: 'string',
+              enum: ['full', 'metadata', 'minimal', 'raw'],
+              description: 'Message format (for get_message/get_thread)',
+            },
+            metadata_headers: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Metadata headers to include (for metadata format)',
+            },
+            to: {
+              type: 'string',
+              description: 'Recipient email (for send_message)',
+            },
+            cc: {
+              type: 'string',
+              description: 'CC recipients (for send_message)',
+            },
+            bcc: {
+              type: 'string',
+              description: 'BCC recipients (for send_message)',
+            },
+            subject: {
+              type: 'string',
+              description: 'Email subject (for send_message)',
+            },
+            body: {
+              type: 'string',
+              description: 'Email body (for send_message)',
+            },
+            raw: {
+              type: 'string',
+              description: 'Base64url encoded RFC 2822 message (for send_message)',
+            },
+          },
+          required: ['action'],
+        },
+      },
+    ];
+  }
+
+  /**
+   * Define Google Calendar tools
+   */
+  private getGoogleCalendarToolDefinitions(): LLMTool[] {
+    return [
+      {
+        name: 'calendar_action',
+        description:
+          'Use the connected Google Calendar account to list and manage events. ' +
+          'Write actions (create/update/delete) require user approval.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: [
+                'list_calendars',
+                'list_events',
+                'get_event',
+                'create_event',
+                'update_event',
+                'delete_event',
+              ],
+              description: 'Action to perform',
+            },
+            calendar_id: {
+              type: 'string',
+              description: 'Calendar ID (defaults to primary)',
+            },
+            event_id: {
+              type: 'string',
+              description: 'Event ID (for get/update/delete)',
+            },
+            query: {
+              type: 'string',
+              description: 'Search query (for list_events)',
+            },
+            time_min: {
+              type: 'string',
+              description: 'ISO start time (for list_events)',
+            },
+            time_max: {
+              type: 'string',
+              description: 'ISO end time (for list_events)',
+            },
+            max_results: {
+              type: 'number',
+              description: 'Max results (for list_events)',
+            },
+            page_token: {
+              type: 'string',
+              description: 'Pagination token (for list_events)',
+            },
+            single_events: {
+              type: 'boolean',
+              description: 'Expand recurring events (for list_events)',
+            },
+            order_by: {
+              type: 'string',
+              enum: ['startTime', 'updated'],
+              description: 'Order results (for list_events)',
+            },
+            summary: {
+              type: 'string',
+              description: 'Event summary (for create/update)',
+            },
+            description: {
+              type: 'string',
+              description: 'Event description (for create/update)',
+            },
+            location: {
+              type: 'string',
+              description: 'Event location (for create/update)',
+            },
+            start: {
+              type: 'string',
+              description: 'Event start ISO time (for create/update)',
+            },
+            end: {
+              type: 'string',
+              description: 'Event end ISO time (for create/update)',
+            },
+            attendees: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Attendee emails (for create/update)',
+            },
+            time_zone: {
+              type: 'string',
+              description: 'IANA time zone (for create/update)',
+            },
+            payload: {
+              type: 'object',
+              description: 'Raw event payload override (for create/update)',
             },
           },
           required: ['action'],

@@ -3,8 +3,8 @@ import * as path from 'path';
 import mime from 'mime-types';
 import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
-import { GoogleDriveSettingsManager } from '../../settings/google-drive-manager';
-import { googleDriveRequest, googleDriveUpload } from '../../utils/google-drive-api';
+import { GoogleWorkspaceSettingsManager } from '../../settings/google-workspace-manager';
+import { googleDriveRequest, googleDriveUpload } from '../../utils/google-workspace-api';
 
 type GoogleDriveAction =
   | 'get_current_user'
@@ -43,7 +43,7 @@ export class GoogleDriveTools {
   }
 
   static isEnabled(): boolean {
-    return GoogleDriveSettingsManager.loadSettings().enabled;
+    return GoogleWorkspaceSettingsManager.loadSettings().enabled;
   }
 
   private async requireApproval(summary: string, details: Record<string, unknown>): Promise<void> {
@@ -97,9 +97,9 @@ export class GoogleDriveTools {
   }
 
   async executeAction(input: GoogleDriveActionInput): Promise<any> {
-    const settings = GoogleDriveSettingsManager.loadSettings();
+    const settings = GoogleWorkspaceSettingsManager.loadSettings();
     if (!settings.enabled) {
-      throw new Error('Google Drive integration is disabled. Enable it in Settings > Integrations > Google Drive.');
+      throw new Error('Google Workspace integration is disabled. Enable it in Settings > Integrations > Google Workspace.');
     }
 
     const action = input.action;
