@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ChannelData, ChannelUserData, SecurityMode, ContextType, ContextPolicy } from '../../shared/types';
 import { PairingCodeDisplay } from './PairingCodeDisplay';
 import { ContextPolicySettings } from './ContextPolicySettings';
@@ -32,11 +32,7 @@ export function GoogleChatSettings({ onStatusChange }: GoogleChatSettingsProps) 
   const [contextPolicies, setContextPolicies] = useState<Record<ContextType, ContextPolicy>>({} as Record<ContextType, ContextPolicy>);
   const [savingPolicy, setSavingPolicy] = useState(false);
 
-  useEffect(() => {
-    loadChannel();
-  }, []);
-
-  const loadChannel = async () => {
+  const loadChannel = useCallback(async () => {
     try {
       setLoading(true);
       const channels = await window.electronAPI.getGatewayChannels();
@@ -65,8 +61,22 @@ export function GoogleChatSettings({ onStatusChange }: GoogleChatSettingsProps) 
     } finally {
       setLoading(false);
     }
-  };
+  }, [onStatusChange]);
 
+  useEffect(() => {
+    loadChannel();
+  }, [loadChannel]);
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.onGatewayUsersUpdated?.((data) => {
+      if (data?.channelType !== 'googlechat') return;
+      if (channel && data?.channelId && data.channelId !== channel.id) return;
+      loadChannel();
+    });
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [channel?.id, loadChannel]);
 
   const handleAddChannel = async () => {
     if (!serviceAccountKeyPath.trim()) return;

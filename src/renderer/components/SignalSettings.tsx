@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ChannelData, ChannelUserData, SecurityMode } from '../../shared/types';
 
 interface SignalSettingsProps {
@@ -35,11 +35,7 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
   // Pairing code state
   const [pairingCode, setPairingCode] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadChannel();
-  }, []);
-
-  const loadChannel = async () => {
+  const loadChannel = useCallback(async () => {
     try {
       setLoading(true);
       const channels = await window.electronAPI.getGatewayChannels();
@@ -75,7 +71,22 @@ export function SignalSettings({ onStatusChange }: SignalSettingsProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [onStatusChange]);
+
+  useEffect(() => {
+    loadChannel();
+  }, [loadChannel]);
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.onGatewayUsersUpdated?.((data) => {
+      if (data?.channelType !== 'signal') return;
+      if (channel && data?.channelId && data.channelId !== channel.id) return;
+      loadChannel();
+    });
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [channel?.id, loadChannel]);
 
   const handleAddChannel = async () => {
     if (!phoneNumber.trim()) {

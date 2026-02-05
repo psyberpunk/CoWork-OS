@@ -8894,7 +8894,7 @@ button {
 
 .box-status-badge,
 .onedrive-status-badge,
-.google-drive-status-badge,
+.google-workspace-status-badge,
 .dropbox-status-badge,
 .sharepoint-status-badge {
   display: inline-flex;
@@ -8910,7 +8910,7 @@ button {
 
 .box-status-badge.connected,
 .onedrive-status-badge.connected,
-.google-drive-status-badge.connected,
+.google-workspace-status-badge.connected,
 .dropbox-status-badge.connected,
 .sharepoint-status-badge.connected {
   color: var(--color-success, #22c55e);
@@ -8920,7 +8920,7 @@ button {
 
 .box-status-badge.configured,
 .onedrive-status-badge.configured,
-.google-drive-status-badge.configured,
+.google-workspace-status-badge.configured,
 .dropbox-status-badge.configured,
 .sharepoint-status-badge.configured {
   color: var(--color-text-secondary);
@@ -8929,7 +8929,7 @@ button {
 
 .box-status-badge.missing,
 .onedrive-status-badge.missing,
-.google-drive-status-badge.missing,
+.google-workspace-status-badge.missing,
 .dropbox-status-badge.missing,
 .sharepoint-status-badge.missing {
   color: var(--color-error, #ef4444);

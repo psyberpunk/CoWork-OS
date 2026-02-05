@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ChannelData, ChannelUserData, SecurityMode } from '../../shared/types';
 
 interface SlackSettingsProps {
@@ -23,11 +23,7 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
   // Pairing code state
   const [pairingCode, setPairingCode] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadChannel();
-  }, []);
-
-  const loadChannel = async () => {
+  const loadChannel = useCallback(async () => {
     try {
       setLoading(true);
       const channels = await window.electronAPI.getGatewayChannels();
@@ -48,7 +44,22 @@ export function SlackSettings({ onStatusChange }: SlackSettingsProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [onStatusChange]);
+
+  useEffect(() => {
+    loadChannel();
+  }, [loadChannel]);
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.onGatewayUsersUpdated?.((data) => {
+      if (data?.channelType !== 'slack') return;
+      if (channel && data?.channelId && data.channelId !== channel.id) return;
+      loadChannel();
+    });
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [channel?.id, loadChannel]);
 
   const handleAddChannel = async () => {
     if (!botToken.trim() || !appToken.trim()) return;

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ChannelData, ChannelUserData, SecurityMode } from '../../shared/types';
 import QRCode from 'qrcode';
 
@@ -29,53 +29,7 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
   // Pairing code state
   const [pairingCode, setPairingCode] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadChannel();
-
-    // Listen for QR code updates
-    const handleQrCode = (_event: any, qr: string) => {
-      setQrCode(qr);
-      setQrLoading(false);
-    };
-
-    const handleWhatsAppConnected = () => {
-      setQrCode(null);
-      setQrLoading(false);
-      loadChannel();
-    };
-
-    window.electronAPI?.onWhatsAppQRCode?.(handleQrCode);
-    window.electronAPI?.onWhatsAppConnected?.(handleWhatsAppConnected);
-
-    return () => {
-      // Cleanup listeners if needed
-    };
-  }, []);
-
-  // Render QR code when it changes
-  useEffect(() => {
-    if (qrCode) {
-      renderQRCode(qrCode);
-    }
-  }, [qrCode]);
-
-  const renderQRCode = async (qr: string) => {
-    try {
-      const dataUrl = await QRCode.toDataURL(qr, {
-        width: 256,
-        margin: 2,
-        color: {
-          dark: '#000000',
-          light: '#ffffff',
-        },
-      });
-      setQrDataUrl(dataUrl);
-    } catch (error) {
-      console.error('Failed to render QR code:', error);
-    }
-  };
-
-  const loadChannel = async () => {
+  const loadChannel = useCallback(async () => {
     try {
       setLoading(true);
       const channels = await window.electronAPI.getGatewayChannels();
@@ -107,6 +61,63 @@ export function WhatsAppSettings({ onStatusChange }: WhatsAppSettingsProps) {
       console.error('Failed to load WhatsApp channel:', error);
     } finally {
       setLoading(false);
+    }
+  }, [onStatusChange]);
+
+  useEffect(() => {
+    loadChannel();
+
+    // Listen for QR code updates
+    const handleQrCode = (_event: any, qr: string) => {
+      setQrCode(qr);
+      setQrLoading(false);
+    };
+
+    const handleWhatsAppConnected = () => {
+      setQrCode(null);
+      setQrLoading(false);
+      loadChannel();
+    };
+
+    window.electronAPI?.onWhatsAppQRCode?.(handleQrCode);
+    window.electronAPI?.onWhatsAppConnected?.(handleWhatsAppConnected);
+
+    return () => {
+      // Cleanup listeners if needed
+    };
+  }, [loadChannel]);
+
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.onGatewayUsersUpdated?.((data) => {
+      if (data?.channelType !== 'whatsapp') return;
+      if (channel && data?.channelId && data.channelId !== channel.id) return;
+      loadChannel();
+    });
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [channel?.id, loadChannel]);
+
+  // Render QR code when it changes
+  useEffect(() => {
+    if (qrCode) {
+      renderQRCode(qrCode);
+    }
+  }, [qrCode]);
+
+  const renderQRCode = async (qr: string) => {
+    try {
+      const dataUrl = await QRCode.toDataURL(qr, {
+        width: 256,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#ffffff',
+        },
+      });
+      setQrDataUrl(dataUrl);
+    } catch (error) {
+      console.error('Failed to render QR code:', error);
     }
   };
 

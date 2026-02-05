@@ -19,7 +19,7 @@ import { XSettings } from './XSettings';
 import { NotionSettings } from './NotionSettings';
 import { BoxSettings } from './BoxSettings';
 import { OneDriveSettings } from './OneDriveSettings';
-import { GoogleDriveSettings } from './GoogleDriveSettings';
+import { GoogleWorkspaceSettings } from './GoogleWorkspaceSettings';
 import { DropboxSettings } from './DropboxSettings';
 import { SharePointSettings } from './SharePointSettings';
 import { SearchSettings } from './SearchSettings';
@@ -48,7 +48,7 @@ type SettingsTab = 'appearance' | 'personality' | 'missioncontrol' | 'tray' | 'v
 type SecondaryChannel = 'discord' | 'imessage' | 'signal' | 'mattermost' | 'matrix' | 'twitch' | 'line' | 'bluebubbles' | 'email' | 'googlechat';
 
 // App integrations shown inside "Integrations" tab
-type IntegrationChannel = 'notion' | 'box' | 'onedrive' | 'googledrive' | 'dropbox' | 'sharepoint';
+type IntegrationChannel = 'notion' | 'box' | 'onedrive' | 'googleworkspace' | 'dropbox' | 'sharepoint';
 
 interface SettingsProps {
   onBack: () => void;
@@ -296,7 +296,7 @@ const integrationItems: Array<{ key: IntegrationChannel; label: string; icon: Re
   { key: 'notion', label: 'Notion', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M8 7h8M8 11h8M8 15h6" /></svg> },
   { key: 'sharepoint', label: 'SharePoint', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 8h10M7 12h6" /></svg> },
   { key: 'onedrive', label: 'OneDrive', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 18h10a4 4 0 0 0 0-8 5 5 0 0 0-9.7-1.6A4 4 0 0 0 7 18z" /></svg> },
-  { key: 'googledrive', label: 'Google Drive', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 7l4-4h8l4 4-8 14H8L4 7z" /></svg> },
+  { key: 'googleworkspace', label: 'Google Workspace', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 7l4-4h8l4 4-8 14H8L4 7z" /></svg> },
   { key: 'box', label: 'Box', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M7 8h10M7 12h10M7 16h6" /></svg> },
   { key: 'dropbox', label: 'Dropbox', icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 5l5 3-5 3-5-3 5-3zm10 0l5 3-5 3-5-3 5-3zM7 13l5 3-5 3-5-3 5-3zm10 0l5 3-5 3-5-3 5-3z" /></svg> },
 ];
@@ -1309,7 +1309,7 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
                   {activeIntegration === 'notion' && <NotionSettings />}
                   {activeIntegration === 'box' && <BoxSettings />}
                   {activeIntegration === 'onedrive' && <OneDriveSettings />}
-                  {activeIntegration === 'googledrive' && <GoogleDriveSettings />}
+                  {activeIntegration === 'googleworkspace' && <GoogleWorkspaceSettings />}
                   {activeIntegration === 'dropbox' && <DropboxSettings />}
                   {activeIntegration === 'sharepoint' && <SharePointSettings />}
                 </div>
