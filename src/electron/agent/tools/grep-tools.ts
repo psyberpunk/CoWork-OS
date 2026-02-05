@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
 import * as path from 'path';
 import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
@@ -32,6 +33,7 @@ export class GrepTools {
         description:
           'Powerful regex-based content search across files. ' +
           'Supports full regex syntax (e.g., "async function.*fetch", "class\\s+\\w+"). ' +
+          'Searches text files only; binary formats like PDF/DOCX are skipped. ' +
           'Use this to find code patterns, function definitions, imports, etc. ' +
           'PREFERRED over search_files for content search.',
         input_schema: {
@@ -99,6 +101,7 @@ export class GrepTools {
     filesSearched: number;
     truncated: boolean;
     error?: string;
+    warning?: string;
   }> {
     const {
       pattern,
@@ -115,6 +118,18 @@ export class GrepTools {
     });
 
     try {
+      if ((await this.isDocumentHeavyWorkspace()) && (!globPattern || /\.(pdf|docx)\b/i.test(globPattern))) {
+        return {
+          success: true,
+          pattern,
+          matches: [],
+          totalMatches: 0,
+          filesSearched: 0,
+          truncated: false,
+          warning: 'Workspace appears document-heavy (PDF/DOCX). The grep tool only searches text files. Use read_file for those documents.',
+        };
+      }
+
       // Compile regex
       let regex: RegExp;
       try {
@@ -327,7 +342,8 @@ export class GrepTools {
 
           // Apply glob filter if specified
           if (globRegex) {
-            if (!globRegex.test(relativePath) && !globRegex.test(entry.name)) {
+            const normalizedRelative = relativePath.split(path.sep).join('/');
+            if (!globRegex.test(normalizedRelative) && !globRegex.test(entry.name)) {
               continue;
             }
           }
@@ -395,18 +411,8 @@ export class GrepTools {
    * Convert glob pattern to regex
    */
   private globToRegex(pattern: string): RegExp {
-    // Handle brace expansion
     const expandedPatterns = this.expandBraces(pattern);
-
-    const regexParts = expandedPatterns.map((p) => {
-      let regex = p
-        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-        .replace(/\\\*\\\*/g, '.*')
-        .replace(/\\\*/g, '[^/]*')
-        .replace(/\\\?/g, '[^/]');
-      return regex;
-    });
-
+    const regexParts = expandedPatterns.map((p) => this.globPatternToRegex(p));
     const combined = regexParts.length > 1 ? `(${regexParts.join('|')})` : regexParts[0];
     return new RegExp(`^${combined}$`, 'i');
   }
@@ -428,5 +434,84 @@ export class GrepTools {
     }
 
     return results;
+  }
+
+  /**
+   * Heuristic: detect workspaces dominated by PDF/DOCX files
+   */
+  private async isDocumentHeavyWorkspace(): Promise<boolean> {
+    try {
+      const entries = await fsPromises.readdir(this.workspace.path, { withFileTypes: true });
+      let fileCount = 0;
+      let docCount = 0;
+      const maxEntries = 200;
+
+      for (const entry of entries) {
+        if (fileCount >= maxEntries) break;
+        if (!entry.isFile()) continue;
+        fileCount++;
+        const ext = path.extname(entry.name).toLowerCase();
+        if (ext === '.pdf' || ext === '.docx') {
+          docCount++;
+        }
+      }
+
+      if (fileCount < 5) return false;
+      return docCount / fileCount >= 0.5;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Convert a glob pattern to a regex string (without delimiters)
+   */
+  private globPatternToRegex(pattern: string): string {
+    let regex = '';
+    let i = 0;
+
+    while (i < pattern.length) {
+      const char = pattern[i];
+
+      if (char === '*') {
+        const isDoubleStar = pattern[i + 1] === '*';
+        if (isDoubleStar) {
+          i += 2;
+          if (pattern[i] === '/') {
+            regex += '(?:.*/)?';
+            i += 1;
+          } else {
+            regex += '.*';
+          }
+        } else {
+          regex += '[^/]*';
+          i += 1;
+        }
+        continue;
+      }
+
+      if (char === '?') {
+        regex += '[^/]';
+        i += 1;
+        continue;
+      }
+
+      if ('+^${}()|[]\\.'.includes(char)) {
+        regex += `\\${char}`;
+        i += 1;
+        continue;
+      }
+
+      if (char === '/') {
+        regex += '/';
+        i += 1;
+        continue;
+      }
+
+      regex += char;
+      i += 1;
+    }
+
+    return regex;
   }
 }

@@ -152,6 +152,122 @@ describe('GrepTools', () => {
     });
   });
 
+  describe('glob pattern conversion', () => {
+    it('should handle double-star and extensions', () => {
+      const regex = (grepTools as any).globToRegex('**/*.md');
+
+      expect(regex.test('README.md')).toBe(true);
+      expect(regex.test('docs/guide.md')).toBe(true);
+      expect(regex.test('docs/guide.mdx')).toBe(false);
+    });
+
+    it('should handle brace expansion', () => {
+      const regex = (grepTools as any).globToRegex('**/*.{md,txt}');
+
+      expect(regex.test('docs/readme.md')).toBe(true);
+      expect(regex.test('docs/readme.txt')).toBe(true);
+      expect(regex.test('docs/readme.pdf')).toBe(false);
+    });
+
+    it('should handle nested directories with double-star', () => {
+      const regex = (grepTools as any).globToRegex('**/src/**/*.ts');
+
+      expect(regex.test('src/index.ts')).toBe(true);
+      expect(regex.test('packages/core/src/utils/helper.ts')).toBe(true);
+      expect(regex.test('src/components/Button.tsx')).toBe(false);
+    });
+
+    it('should handle single-star wildcard', () => {
+      const regex = (grepTools as any).globToRegex('*.ts');
+
+      expect(regex.test('index.ts')).toBe(true);
+      expect(regex.test('src/index.ts')).toBe(false);
+    });
+
+    it('should handle question mark wildcard', () => {
+      const regex = (grepTools as any).globToRegex('file?.ts');
+
+      expect(regex.test('file1.ts')).toBe(true);
+      expect(regex.test('fileA.ts')).toBe(true);
+      expect(regex.test('file12.ts')).toBe(false);
+    });
+
+    it('should escape special regex characters', () => {
+      const regex = (grepTools as any).globToRegex('test[1].ts');
+
+      expect(regex.test('test[1].ts')).toBe(true);
+      expect(regex.test('test1.ts')).toBe(false);
+    });
+  });
+
+  describe('globPatternToRegex', () => {
+    it('should convert double-star followed by slash correctly', () => {
+      const result = (grepTools as any).globPatternToRegex('**/foo');
+
+      expect(result).toBe('(?:.*/)?foo');
+    });
+
+    it('should convert double-star at end correctly', () => {
+      const result = (grepTools as any).globPatternToRegex('src/**');
+
+      expect(result).toBe('src/.*');
+    });
+
+    it('should convert single-star correctly', () => {
+      const result = (grepTools as any).globPatternToRegex('*.ts');
+
+      expect(result).toBe('[^/]*\\.ts');
+    });
+
+    it('should handle double-star alone', () => {
+      const result = (grepTools as any).globPatternToRegex('**');
+
+      expect(result).toBe('.*');
+    });
+
+    it('should handle empty pattern', () => {
+      const result = (grepTools as any).globPatternToRegex('');
+
+      expect(result).toBe('');
+    });
+
+    it('should handle pattern with multiple double-stars', () => {
+      const regex = (grepTools as any).globToRegex('**/src/**/test/**/*.ts');
+
+      expect(regex.test('src/test/file.ts')).toBe(true);
+      expect(regex.test('pkg/src/utils/test/unit/spec.ts')).toBe(true);
+    });
+  });
+
+  describe('document-heavy workspace detection', () => {
+    // Note: isDocumentHeavyWorkspace reads the workspace.path directory
+    // Since we can't mock fs.readdirSync in ESM, we test the logic indirectly
+    // through the grep method which triggers the heuristic
+
+    it('should return false for non-existent workspace paths', () => {
+      // The workspace path doesn't exist, so readdirSync will throw
+      // and the method should return false
+      const testGrepTools = new GrepTools(
+        { ...mockWorkspace, path: '/non-existent-path-12345' },
+        mockDaemon as any,
+        'test-task-id'
+      );
+
+      const result = (testGrepTools as any).isDocumentHeavyWorkspace();
+
+      expect(result).toBe(false);
+    });
+
+    it('should check files in the workspace root directory', () => {
+      // This tests that the method runs without throwing
+      // The actual test workspace likely has few or no PDF files
+      const result = (grepTools as any).isDocumentHeavyWorkspace();
+
+      // Since /test/workspace doesn't exist, it should return false
+      expect(result).toBe(false);
+    });
+  });
+
   describe('logging', () => {
     it('should log grep search event', async () => {
       await grepTools.grep({ pattern: 'test' });
