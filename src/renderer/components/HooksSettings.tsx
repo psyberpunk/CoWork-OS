@@ -427,7 +427,7 @@ export function HooksSettings() {
           gap: 16px;
           margin-bottom: 16px;
           padding: 8px 12px;
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           border-radius: 6px;
         }
 
@@ -458,13 +458,13 @@ export function HooksSettings() {
         .status-address {
           font-family: monospace;
           font-size: 12px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
         }
 
         .hooks-token-section {
           margin-top: 16px;
           padding: 12px;
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           border-radius: 6px;
         }
 
@@ -477,7 +477,7 @@ export function HooksSettings() {
         .token-display code {
           flex: 1;
           padding: 6px 10px;
-          background: var(--bg-primary);
+          background: var(--color-bg-primary);
           border-radius: 4px;
           font-size: 12px;
           word-break: break-all;
@@ -494,19 +494,19 @@ export function HooksSettings() {
           align-items: center;
           gap: 12px;
           padding: 8px 12px;
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           border-radius: 6px;
         }
 
         .endpoint-item code {
           font-family: monospace;
           font-size: 13px;
-          color: var(--accent-color);
+          color: var(--color-accent);
         }
 
         .endpoint-desc {
           font-size: 13px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
         }
 
         .button-row {
@@ -535,20 +535,20 @@ export function HooksSettings() {
         .code-example {
           margin-bottom: 16px;
           padding: 12px;
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           border-radius: 6px;
         }
 
         .example-title {
           margin-bottom: 8px;
           font-size: 13px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
         }
 
         .code-example pre {
           margin: 0;
           padding: 10px;
-          background: var(--bg-primary);
+          background: var(--color-bg-primary);
           border-radius: 4px;
           font-size: 12px;
           overflow-x: auto;

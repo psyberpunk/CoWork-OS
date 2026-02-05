@@ -214,20 +214,20 @@ export function MentionInput({
         .mention-input {
           width: 100%;
           padding: 10px 12px;
-          border: 1px solid var(--border-color);
+          border: 1px solid var(--color-border);
           border-radius: 8px;
-          background: var(--bg-primary);
-          color: var(--text-primary);
+          background: var(--color-bg-primary);
+          color: var(--color-text-primary);
           font-size: 14px;
         }
 
         .mention-input:focus {
           outline: none;
-          border-color: var(--accent-color);
+          border-color: var(--color-accent);
         }
 
         .mention-input:disabled {
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
         }
 
         .mention-dropdown {
@@ -235,8 +235,8 @@ export function MentionInput({
           top: 100%;
           left: 0;
           right: 0;
-          background: var(--bg-primary);
-          border: 1px solid var(--border-color);
+          background: var(--color-bg-primary);
+          border: 1px solid var(--color-border);
           border-radius: 8px;
           box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
           z-index: 100;
@@ -255,7 +255,7 @@ export function MentionInput({
         }
 
         .mention-dropdown-item:hover {
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
         }
 
         .agent-icon {
@@ -279,12 +279,12 @@ export function MentionInput({
         .agent-name {
           font-size: 13px;
           font-weight: 500;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
         }
 
         .agent-description {
           font-size: 11px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
@@ -293,7 +293,7 @@ export function MentionInput({
         .mention-details {
           margin-top: 12px;
           padding: 12px;
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           border-radius: 8px;
         }
 
@@ -313,15 +313,15 @@ export function MentionInput({
           height: 24px;
           border: none;
           background: transparent;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
           font-size: 18px;
           cursor: pointer;
           border-radius: 4px;
         }
 
         .btn-clear:hover {
-          background: var(--bg-tertiary);
-          color: var(--text-primary);
+          background: var(--color-bg-tertiary);
+          color: var(--color-text-primary);
         }
 
         .mention-type-selector {
@@ -333,26 +333,26 @@ export function MentionInput({
 
         .mention-type-selector label {
           font-size: 13px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
         }
 
         .mention-type-selector select {
           flex: 1;
           padding: 6px 10px;
-          border: 1px solid var(--border-color);
+          border: 1px solid var(--color-border);
           border-radius: 6px;
-          background: var(--bg-primary);
-          color: var(--text-primary);
+          background: var(--color-bg-primary);
+          color: var(--color-text-primary);
           font-size: 13px;
         }
 
         .mention-context {
           width: 100%;
           padding: 10px;
-          border: 1px solid var(--border-color);
+          border: 1px solid var(--color-border);
           border-radius: 6px;
-          background: var(--bg-primary);
-          color: var(--text-primary);
+          background: var(--color-bg-primary);
+          color: var(--color-text-primary);
           font-size: 13px;
           resize: vertical;
           font-family: inherit;
@@ -360,7 +360,7 @@ export function MentionInput({
 
         .mention-context:focus {
           outline: none;
-          border-color: var(--accent-color);
+          border-color: var(--color-accent);
         }
 
         .mention-actions {
@@ -381,12 +381,12 @@ export function MentionInput({
 
         .btn-cancel {
           background: transparent;
-          border: 1px solid var(--border-color);
-          color: var(--text-secondary);
+          border: 1px solid var(--color-border);
+          color: var(--color-text-secondary);
         }
 
         .btn-cancel:hover {
-          background: var(--bg-tertiary);
+          background: var(--color-bg-tertiary);
         }
 
         .btn-submit {

@@ -153,7 +153,7 @@ export function WorkingStateEditor({
           }
 
           .working-state-editor {
-            background: var(--bg-primary);
+            background: var(--color-bg-primary);
             border-radius: 12px;
             width: 600px;
             max-height: 80vh;
@@ -166,7 +166,7 @@ export function WorkingStateEditor({
             align-items: center;
             justify-content: space-between;
             padding: 16px 20px;
-            border-bottom: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--color-border);
           }
 
           .editor-title {
@@ -182,20 +182,20 @@ export function WorkingStateEditor({
           .title-text {
             font-size: 16px;
             font-weight: 600;
-            color: var(--text-primary);
+            color: var(--color-text-primary);
           }
 
           .close-btn {
             background: none;
             border: none;
-            color: var(--text-secondary);
+            color: var(--color-text-secondary);
             cursor: pointer;
             font-size: 18px;
             padding: 4px 8px;
           }
 
           .close-btn:hover {
-            color: var(--text-primary);
+            color: var(--color-text-primary);
           }
 
           .editor-error {
@@ -225,22 +225,22 @@ export function WorkingStateEditor({
             display: block;
             font-size: 13px;
             font-weight: 500;
-            color: var(--text-secondary);
+            color: var(--color-text-secondary);
             margin-bottom: 8px;
           }
 
           .label-hint {
             font-weight: 400;
-            color: var(--text-tertiary);
+            color: var(--color-text-muted);
           }
 
           .form-group textarea {
             width: 100%;
             padding: 12px;
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--color-border);
             border-radius: 8px;
-            background: var(--bg-secondary);
-            color: var(--text-primary);
+            background: var(--color-bg-secondary);
+            color: var(--color-text-primary);
             font-size: 13px;
             font-family: inherit;
             line-height: 1.6;
@@ -249,11 +249,11 @@ export function WorkingStateEditor({
 
           .form-group textarea:focus {
             outline: none;
-            border-color: var(--accent-color);
+            border-color: var(--color-accent);
           }
 
           .form-group textarea::placeholder {
-            color: var(--text-tertiary);
+            color: var(--color-text-muted);
           }
 
           .file-refs-input {
@@ -266,7 +266,7 @@ export function WorkingStateEditor({
             justify-content: flex-end;
             gap: 10px;
             padding: 16px 20px;
-            border-top: 1px solid var(--border-color);
+            border-top: 1px solid var(--color-border);
           }
 
           .cancel-btn,
@@ -281,16 +281,16 @@ export function WorkingStateEditor({
           }
 
           .cancel-btn {
-            background: var(--bg-secondary);
-            color: var(--text-secondary);
+            background: var(--color-bg-secondary);
+            color: var(--color-text-secondary);
           }
 
           .cancel-btn:hover:not(:disabled) {
-            background: var(--bg-tertiary);
+            background: var(--color-bg-tertiary);
           }
 
           .save-btn {
-            background: var(--accent-color);
+            background: var(--color-accent);
             color: white;
           }
 

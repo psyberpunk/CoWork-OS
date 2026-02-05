@@ -125,7 +125,7 @@ export function TaskBoardColumn({
           flex: 1;
           min-width: 280px;
           max-width: 350px;
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           border-radius: 12px;
           display: flex;
           flex-direction: column;
@@ -134,13 +134,13 @@ export function TaskBoardColumn({
         }
 
         .task-board-column.drag-over {
-          background: var(--bg-tertiary);
-          box-shadow: inset 0 0 0 2px var(--accent-color);
+          background: var(--color-bg-tertiary);
+          box-shadow: inset 0 0 0 2px var(--color-accent);
         }
 
         .column-header {
           padding: 12px 16px;
-          border-bottom: 1px solid var(--border-color);
+          border-bottom: 1px solid var(--color-border);
         }
 
         .column-title {
@@ -158,21 +158,22 @@ export function TaskBoardColumn({
         .column-name {
           font-size: 13px;
           font-weight: 600;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
           flex: 1;
         }
 
         .column-count {
           font-size: 12px;
-          color: var(--text-tertiary);
-          background: var(--bg-primary);
+          color: var(--color-text-muted);
+          background: var(--color-bg-primary);
           padding: 2px 8px;
           border-radius: 10px;
         }
 
         .column-count.over-limit {
-          background: #ef444420;
-          color: #ef4444;
+          background: var(--color-error-subtle);
+          color: var(--color-error);
+          font-weight: 500;
         }
 
         .column-content {
@@ -191,13 +192,14 @@ export function TaskBoardColumn({
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
           padding: 40px 20px;
           text-align: center;
         }
 
         .column-empty p {
           margin: 0;
+          font-size: 13px;
         }
 
         .column-empty .hint {

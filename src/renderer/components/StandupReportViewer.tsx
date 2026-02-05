@@ -287,7 +287,7 @@ const styles = `
     display: flex;
     flex-direction: column;
     height: 100%;
-    background: var(--bg-primary);
+    background: var(--color-bg-primary);
   }
 
   .viewer-header {
@@ -295,8 +295,8 @@ const styles = `
     align-items: center;
     justify-content: space-between;
     padding: 16px 20px;
-    border-bottom: 1px solid var(--border-color);
-    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-bg-secondary);
   }
 
   .header-content {
@@ -309,12 +309,12 @@ const styles = `
     margin: 0;
     font-size: 18px;
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--color-text-primary);
   }
 
   .btn-generate {
     padding: 8px 16px;
-    background: var(--accent-color);
+    background: var(--color-accent);
     color: white;
     border: none;
     border-radius: 6px;
@@ -336,15 +336,15 @@ const styles = `
   .btn-close {
     background: transparent;
     border: none;
-    color: var(--text-secondary);
+    color: var(--color-text-secondary);
     cursor: pointer;
     padding: 8px;
     border-radius: 6px;
   }
 
   .btn-close:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-primary);
   }
 
   .viewer-content {
@@ -355,8 +355,8 @@ const styles = `
 
   .report-sidebar {
     width: 240px;
-    border-right: 1px solid var(--border-color);
-    background: var(--bg-secondary);
+    border-right: 1px solid var(--color-border);
+    background: var(--color-bg-secondary);
     display: flex;
     flex-direction: column;
   }
@@ -364,12 +364,12 @@ const styles = `
   .report-sidebar h3 {
     font-size: 12px;
     font-weight: 600;
-    color: var(--text-secondary);
+    color: var(--color-text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     padding: 12px 16px;
     margin: 0;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--color-border);
   }
 
   .report-list {
@@ -393,11 +393,11 @@ const styles = `
   }
 
   .report-item:hover {
-    background: var(--bg-tertiary);
+    background: var(--color-bg-tertiary);
   }
 
   .report-item.selected {
-    background: var(--accent-color);
+    background: var(--color-accent);
   }
 
   .report-item.selected .report-date,
@@ -408,12 +408,12 @@ const styles = `
   .report-date {
     font-size: 13px;
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--color-text-primary);
   }
 
   .report-summary-mini {
     font-size: 11px;
-    color: var(--text-secondary);
+    color: var(--color-text-secondary);
   }
 
   .report-main {
@@ -429,13 +429,13 @@ const styles = `
   .report-header h3 {
     font-size: 20px;
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--color-text-primary);
     margin: 0;
   }
 
   .report-time {
     font-size: 12px;
-    color: var(--text-secondary);
+    color: var(--color-text-secondary);
     margin-top: 4px;
     display: block;
   }
@@ -448,8 +448,8 @@ const styles = `
   }
 
   .report-section {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
     border-radius: 10px;
     padding: 14px;
   }
@@ -470,7 +470,7 @@ const styles = `
     margin: 0;
     font-size: 14px;
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--color-text-primary);
   }
 
   .section-count {
@@ -478,8 +478,8 @@ const styles = `
     font-weight: 600;
     padding: 2px 8px;
     border-radius: 10px;
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
+    background: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
   }
 
   .report-section.completed .section-count {
@@ -499,7 +499,7 @@ const styles = `
 
   .section-empty {
     font-size: 12px;
-    color: var(--text-tertiary);
+    color: var(--color-text-muted);
     font-style: italic;
   }
 
@@ -511,9 +511,9 @@ const styles = `
 
   .task-item {
     font-size: 13px;
-    color: var(--text-primary);
+    color: var(--color-text-primary);
     padding: 6px 0;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--color-border);
   }
 
   .task-item:last-child {
@@ -522,7 +522,7 @@ const styles = `
 
   .task-item::before {
     content: "•";
-    color: var(--text-tertiary);
+    color: var(--color-text-muted);
     margin-right: 8px;
   }
 
@@ -532,8 +532,8 @@ const styles = `
   }
 
   .report-summary {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
     border-radius: 10px;
     padding: 14px;
   }
@@ -542,13 +542,13 @@ const styles = `
     margin: 0 0 8px 0;
     font-size: 14px;
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--color-text-primary);
   }
 
   .report-summary p {
     margin: 0;
     font-size: 13px;
-    color: var(--text-secondary);
+    color: var(--color-text-secondary);
     line-height: 1.5;
   }
 
@@ -558,10 +558,10 @@ const styles = `
     gap: 8px;
     margin-top: 12px;
     padding: 10px 14px;
-    background: var(--bg-tertiary);
+    background: var(--color-bg-tertiary);
     border-radius: 8px;
     font-size: 12px;
-    color: var(--text-secondary);
+    color: var(--color-text-secondary);
   }
 
   .delivery-icon {
@@ -575,7 +575,7 @@ const styles = `
     justify-content: center;
     height: 100%;
     text-align: center;
-    color: var(--text-secondary);
+    color: var(--color-text-secondary);
   }
 
   .no-report-icon {
@@ -588,7 +588,7 @@ const styles = `
     margin: 0;
     font-size: 18px;
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--color-text-primary);
   }
 
   .no-report p {
@@ -600,7 +600,7 @@ const styles = `
     padding: 16px;
     text-align: center;
     font-size: 12px;
-    color: var(--text-tertiary);
+    color: var(--color-text-muted);
   }
 
   .loading-state {
@@ -608,7 +608,7 @@ const styles = `
     align-items: center;
     justify-content: center;
     height: 200px;
-    color: var(--text-secondary);
+    color: var(--color-text-secondary);
     font-size: 14px;
   }
 `;

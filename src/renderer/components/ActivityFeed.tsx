@@ -284,7 +284,7 @@ export function ActivityFeed({
           align-items: center;
           justify-content: space-between;
           padding: 12px 16px;
-          border-bottom: 1px solid var(--border-color);
+          border-bottom: 1px solid var(--color-border);
         }
 
         .activity-feed-title {
@@ -300,7 +300,7 @@ export function ActivityFeed({
         }
 
         .unread-badge {
-          background: var(--accent-color);
+          background: var(--color-accent);
           color: white;
           font-size: 11px;
           font-weight: 600;
@@ -313,7 +313,7 @@ export function ActivityFeed({
         .btn-text {
           background: none;
           border: none;
-          color: var(--accent-color);
+          color: var(--color-accent);
           font-size: 12px;
           cursor: pointer;
           padding: 4px 8px;
@@ -321,22 +321,22 @@ export function ActivityFeed({
         }
 
         .btn-text:hover {
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
         }
 
         .activity-filters {
           display: flex;
           gap: 8px;
           padding: 12px 16px;
-          border-bottom: 1px solid var(--border-color);
+          border-bottom: 1px solid var(--color-border);
         }
 
         .activity-filters select {
           padding: 6px 10px;
-          border: 1px solid var(--border-color);
+          border: 1px solid var(--color-border);
           border-radius: 6px;
-          background: var(--bg-primary);
-          color: var(--text-primary);
+          background: var(--color-bg-primary);
+          color: var(--color-text-primary);
           font-size: 12px;
           cursor: pointer;
         }
@@ -346,7 +346,7 @@ export function ActivityFeed({
           align-items: center;
           gap: 6px;
           font-size: 12px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           cursor: pointer;
         }
 
@@ -363,7 +363,7 @@ export function ActivityFeed({
         .activity-group-title {
           font-size: 11px;
           font-weight: 600;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
           text-transform: uppercase;
           letter-spacing: 0.5px;
           margin-bottom: 8px;
@@ -376,7 +376,7 @@ export function ActivityFeed({
         .activity-empty {
           text-align: center;
           padding: 40px 20px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
         }
 
         .activity-empty p {
@@ -385,21 +385,21 @@ export function ActivityFeed({
 
         .activity-empty-hint {
           font-size: 12px;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
           margin-top: 8px !important;
         }
 
         .activity-error {
           padding: 12px 16px;
-          background: color-mix(in srgb, var(--error-color) 10%, var(--bg-secondary));
-          color: var(--error-color);
+          background: color-mix(in srgb, var(--color-error) 10%, var(--color-bg-secondary));
+          color: var(--color-error);
           font-size: 13px;
         }
 
         .activity-loading {
           padding: 40px;
           text-align: center;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
         }
       `}</style>
     </div>

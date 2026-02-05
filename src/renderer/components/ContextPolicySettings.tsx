@@ -242,7 +242,7 @@ export function ContextPolicySettings({
           display: flex;
           gap: 8px;
           padding: 4px;
-          background: var(--bg-tertiary, #0f0f1a);
+          background: var(--color-bg-tertiary, #0f0f1a);
           border-radius: 8px;
         }
 
@@ -256,19 +256,19 @@ export function ContextPolicySettings({
           background: transparent;
           border: none;
           border-radius: 6px;
-          color: var(--text-secondary, #a0a0b0);
+          color: var(--color-text-secondary, #a0a0b0);
           font-size: 14px;
           cursor: pointer;
           transition: all 0.2s ease;
         }
 
         .tab:hover {
-          color: var(--text-primary, #fff);
-          background: var(--bg-secondary, #1a1a2e);
+          color: var(--color-text-primary, #fff);
+          background: var(--color-bg-secondary, #1a1a2e);
         }
 
         .tab.active {
-          background: var(--accent-color, #6366f1);
+          background: var(--color-accent, #6366f1);
           color: white;
         }
 
@@ -282,13 +282,13 @@ export function ContextPolicySettings({
           margin: 0;
           font-size: 14px;
           font-weight: 600;
-          color: var(--text-primary, #fff);
+          color: var(--color-text-primary, #fff);
         }
 
         .section-description {
           margin: 0;
           font-size: 13px;
-          color: var(--text-secondary, #a0a0b0);
+          color: var(--color-text-secondary, #a0a0b0);
         }
 
         .security-mode-options {
@@ -302,7 +302,7 @@ export function ContextPolicySettings({
           align-items: center;
           gap: 12px;
           padding: 12px 16px;
-          background: var(--bg-tertiary, #0f0f1a);
+          background: var(--color-bg-tertiary, #0f0f1a);
           border: 2px solid transparent;
           border-radius: 8px;
           cursor: pointer;
@@ -310,11 +310,11 @@ export function ContextPolicySettings({
         }
 
         .mode-option:hover {
-          border-color: var(--border-color, #2d2d44);
+          border-color: var(--color-border, #2d2d44);
         }
 
         .mode-option.selected {
-          border-color: var(--accent-color, #6366f1);
+          border-color: var(--color-accent, #6366f1);
           background: rgba(99, 102, 241, 0.1);
         }
 
@@ -332,12 +332,12 @@ export function ContextPolicySettings({
         .mode-label {
           font-size: 14px;
           font-weight: 500;
-          color: var(--text-primary, #fff);
+          color: var(--color-text-primary, #fff);
         }
 
         .mode-description {
           font-size: 12px;
-          color: var(--text-secondary, #a0a0b0);
+          color: var(--color-text-secondary, #a0a0b0);
         }
 
         .warning-banner {
@@ -349,7 +349,7 @@ export function ContextPolicySettings({
           border: 1px solid rgba(245, 158, 11, 0.3);
           border-radius: 6px;
           font-size: 13px;
-          color: var(--warning-color, #f59e0b);
+          color: var(--color-warning, #f59e0b);
         }
 
         .tool-restrictions {
@@ -363,7 +363,7 @@ export function ContextPolicySettings({
           align-items: center;
           gap: 12px;
           padding: 12px 16px;
-          background: var(--bg-tertiary, #0f0f1a);
+          background: var(--color-bg-tertiary, #0f0f1a);
           border-radius: 8px;
           cursor: pointer;
         }
@@ -387,7 +387,7 @@ export function ContextPolicySettings({
           left: 0;
           right: 0;
           bottom: 0;
-          background-color: var(--error-color, #ef4444);
+          background-color: var(--color-error, #ef4444);
           transition: 0.3s;
           border-radius: 24px;
         }
@@ -405,7 +405,7 @@ export function ContextPolicySettings({
         }
 
         .tool-toggle input:checked + .toggle-slider {
-          background-color: var(--success-color, #22c55e);
+          background-color: var(--color-success, #22c55e);
         }
 
         .tool-toggle input:checked + .toggle-slider:before {
@@ -422,23 +422,23 @@ export function ContextPolicySettings({
         .tool-name {
           font-size: 14px;
           font-weight: 500;
-          color: var(--text-primary, #fff);
+          color: var(--color-text-primary, #fff);
         }
 
         .tool-description {
           font-size: 12px;
-          color: var(--text-secondary, #a0a0b0);
+          color: var(--color-text-secondary, #a0a0b0);
         }
 
         .tool-warning {
           font-size: 11px;
-          color: var(--warning-color, #f59e0b);
+          color: var(--color-warning, #f59e0b);
           font-style: italic;
         }
 
         .context-comparison {
           padding: 16px;
-          background: var(--bg-tertiary, #0f0f1a);
+          background: var(--color-bg-tertiary, #0f0f1a);
           border-radius: 8px;
         }
 
@@ -446,7 +446,7 @@ export function ContextPolicySettings({
           margin: 0 0 12px 0;
           font-size: 13px;
           font-weight: 600;
-          color: var(--text-secondary, #a0a0b0);
+          color: var(--color-text-secondary, #a0a0b0);
           text-transform: uppercase;
           letter-spacing: 0.5px;
         }
@@ -461,16 +461,16 @@ export function ContextPolicySettings({
         .context-comparison td {
           padding: 8px 12px;
           text-align: left;
-          border-bottom: 1px solid var(--border-color, #2d2d44);
+          border-bottom: 1px solid var(--color-border, #2d2d44);
         }
 
         .context-comparison th {
           font-weight: 500;
-          color: var(--text-secondary, #a0a0b0);
+          color: var(--color-text-secondary, #a0a0b0);
         }
 
         .context-comparison td {
-          color: var(--text-primary, #fff);
+          color: var(--color-text-primary, #fff);
         }
 
         .context-comparison tr:last-child td {

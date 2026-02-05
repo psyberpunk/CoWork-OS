@@ -160,22 +160,22 @@ export function ActivityFeedItem({
           gap: 12px;
           padding: 12px;
           border-radius: 8px;
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           cursor: pointer;
           transition: all 0.15s ease;
           position: relative;
         }
 
         .activity-feed-item:hover {
-          background: var(--bg-tertiary);
+          background: var(--color-bg-tertiary);
         }
 
         .activity-feed-item.unread {
-          background: color-mix(in srgb, var(--accent-color) 8%, var(--bg-secondary));
+          background: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg-secondary));
         }
 
         .activity-feed-item.pinned {
-          border-left: 3px solid var(--accent-color);
+          border-left: 3px solid var(--color-accent);
         }
 
         .activity-feed-item.compact {
@@ -214,7 +214,7 @@ export function ActivityFeedItem({
         .activity-title {
           font-size: 13px;
           font-weight: 500;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
@@ -222,13 +222,13 @@ export function ActivityFeedItem({
 
         .activity-time {
           font-size: 11px;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
           flex-shrink: 0;
         }
 
         .activity-description {
           font-size: 12px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           margin: 4px 0 0 0;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -248,8 +248,8 @@ export function ActivityFeedItem({
           font-size: 10px;
           padding: 2px 6px;
           border-radius: 4px;
-          background: var(--bg-tertiary);
-          color: var(--text-tertiary);
+          background: var(--color-bg-tertiary);
+          color: var(--color-text-muted);
         }
 
         .activity-actions {
@@ -268,7 +268,7 @@ export function ActivityFeedItem({
           height: 24px;
           border: none;
           background: transparent;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
           cursor: pointer;
           border-radius: 4px;
           display: flex;
@@ -278,12 +278,12 @@ export function ActivityFeedItem({
         }
 
         .activity-action-btn:hover {
-          background: var(--bg-tertiary);
-          color: var(--text-primary);
+          background: var(--color-bg-tertiary);
+          color: var(--color-text-primary);
         }
 
         .activity-action-btn.active {
-          color: var(--accent-color);
+          color: var(--color-accent);
         }
 
         .unread-indicator {
@@ -293,7 +293,7 @@ export function ActivityFeedItem({
           transform: translateY(-50%);
           width: 6px;
           height: 6px;
-          background: var(--accent-color);
+          background: var(--color-accent);
           border-radius: 50%;
         }
       `}</style>

@@ -118,7 +118,7 @@ export function TaskBoardCard({
         )}
       </div>
 
-      <div className="card-title">{task.title}</div>
+      <div className="card-title" title={task.title}>{task.title}</div>
 
       <div className="card-meta">
         {assignedAgent && (
@@ -169,18 +169,23 @@ export function TaskBoardCard({
 
       <style>{`
         .task-board-card {
-          background: var(--bg-primary);
+          background: var(--color-bg-primary);
           border-radius: 8px;
           padding: 12px;
           cursor: pointer;
           transition: all 0.15s ease;
-          border: 1px solid var(--border-color);
+          border: 1px solid var(--color-border);
           position: relative;
         }
 
         .task-board-card:hover {
-          border-color: var(--accent-color);
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          border-color: var(--color-accent);
+          box-shadow: var(--shadow-sm);
+        }
+
+        .task-board-card:focus-visible {
+          outline: 2px solid var(--color-accent);
+          outline-offset: 2px;
         }
 
         .task-board-card.dragging {
@@ -209,6 +214,10 @@ export function TaskBoardCard({
           color: white;
           padding: 2px 6px;
           border-radius: 3px;
+          max-width: 100px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .card-priority {
@@ -224,7 +233,7 @@ export function TaskBoardCard({
         .card-title {
           font-size: 13px;
           font-weight: 500;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
           line-height: 1.4;
           margin-bottom: 8px;
           display: -webkit-box;
@@ -259,23 +268,23 @@ export function TaskBoardCard({
 
         .card-agent .agent-name {
           font-size: 11px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
         }
 
         .card-due {
           font-size: 11px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
         }
 
         .card-due.overdue {
-          color: #ef4444;
+          color: var(--color-error);
           font-weight: 500;
         }
 
         .card-estimate {
           font-size: 11px;
-          color: var(--text-tertiary);
-          background: var(--bg-secondary);
+          color: var(--color-text-muted);
+          background: var(--color-bg-secondary);
           padding: 1px 4px;
           border-radius: 3px;
         }
@@ -288,40 +297,39 @@ export function TaskBoardCard({
 
         .card-time {
           font-size: 10px;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
         }
 
         .card-status {
           font-size: 10px;
           padding: 2px 6px;
           border-radius: 3px;
-          background: var(--bg-secondary);
-          color: var(--text-secondary);
+          background: var(--color-bg-secondary);
+          color: var(--color-text-secondary);
         }
 
+        .card-status.status-executing,
+        .card-status.status-planning,
         .card-status.status-running {
-          background: #3b82f620;
-          color: #3b82f6;
+          background: var(--color-accent-subtle);
+          color: var(--color-accent);
         }
 
         .card-status.status-completed {
-          background: #22c55e20;
-          color: #22c55e;
+          background: var(--color-success-subtle);
+          color: var(--color-success);
         }
 
-        .card-status.status-paused {
-          background: #f59e0b20;
-          color: #f59e0b;
-        }
-
+        .card-status.status-paused,
         .card-status.status-blocked {
-          background: #f59e0b20;
-          color: #f59e0b;
+          background: rgba(251, 191, 36, 0.15);
+          color: var(--color-warning);
         }
 
-        .card-status.status-failed {
-          background: #ef444420;
-          color: #ef4444;
+        .card-status.status-failed,
+        .card-status.status-cancelled {
+          background: var(--color-error-subtle);
+          color: var(--color-error);
         }
 
         .card-quick-actions {
@@ -333,22 +341,24 @@ export function TaskBoardCard({
         }
 
         .quick-action-btn {
-          width: 20px;
-          height: 20px;
-          border: none;
+          width: 22px;
+          height: 22px;
+          border: 1px solid var(--color-border);
           border-radius: 4px;
-          background: var(--bg-tertiary);
-          color: var(--text-secondary);
+          background: var(--color-bg-elevated);
+          color: var(--color-text-secondary);
           cursor: pointer;
           font-size: 12px;
           font-weight: 600;
           display: flex;
           align-items: center;
           justify-content: center;
+          transition: all 0.15s ease;
         }
 
         .quick-action-btn:hover {
-          background: var(--accent-color);
+          background: var(--color-accent);
+          border-color: var(--color-accent);
           color: white;
         }
       `}</style>

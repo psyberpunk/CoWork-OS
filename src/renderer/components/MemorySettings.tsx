@@ -103,29 +103,29 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
       {/* Stats Display */}
       {stats && (
         <div className="memory-stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
-          <div className="stat-card" style={{ padding: '12px', background: 'var(--bg-tertiary)', borderRadius: '8px', textAlign: 'center' }}>
-            <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--text-primary)' }}>
+          <div className="stat-card" style={{ padding: '12px', background: 'var(--color-bg-tertiary)', borderRadius: '8px', textAlign: 'center' }}>
+            <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--color-text-primary)' }}>
               {stats.count.toLocaleString()}
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Memories</div>
+            <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Memories</div>
           </div>
-          <div className="stat-card" style={{ padding: '12px', background: 'var(--bg-tertiary)', borderRadius: '8px', textAlign: 'center' }}>
-            <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--text-primary)' }}>
+          <div className="stat-card" style={{ padding: '12px', background: 'var(--color-bg-tertiary)', borderRadius: '8px', textAlign: 'center' }}>
+            <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--color-text-primary)' }}>
               {stats.totalTokens.toLocaleString()}
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Tokens</div>
+            <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Tokens</div>
           </div>
-          <div className="stat-card" style={{ padding: '12px', background: 'var(--bg-tertiary)', borderRadius: '8px', textAlign: 'center' }}>
-            <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--text-primary)' }}>
+          <div className="stat-card" style={{ padding: '12px', background: 'var(--color-bg-tertiary)', borderRadius: '8px', textAlign: 'center' }}>
+            <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--color-text-primary)' }}>
               {stats.compressedCount.toLocaleString()}
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Compressed</div>
+            <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Compressed</div>
           </div>
-          <div className="stat-card" style={{ padding: '12px', background: 'var(--bg-tertiary)', borderRadius: '8px', textAlign: 'center' }}>
-            <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--text-primary)' }}>
+          <div className="stat-card" style={{ padding: '12px', background: 'var(--color-bg-tertiary)', borderRadius: '8px', textAlign: 'center' }}>
+            <div style={{ fontSize: '24px', fontWeight: '600', color: 'var(--color-text-primary)' }}>
               {Math.round(stats.compressionRatio * 100)}%
             </div>
-            <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Ratio</div>
+            <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Ratio</div>
           </div>
         </div>
       )}
@@ -219,13 +219,13 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
           </div>
 
           {/* Clear Button */}
-          <div className="settings-form-group" style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
+          <div className="settings-form-group" style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--color-border)' }}>
             <button
               className="settings-button settings-button-danger"
               onClick={handleClear}
               disabled={saving || clearing}
               style={{
-                background: 'var(--error-color)',
+                background: 'var(--color-error)',
                 color: 'white',
                 border: 'none',
                 padding: '8px 16px',

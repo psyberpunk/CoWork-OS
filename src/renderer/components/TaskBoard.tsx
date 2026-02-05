@@ -403,7 +403,7 @@ export function TaskBoard({ workspaceId, onTaskSelect }: TaskBoardProps) {
           align-items: center;
           justify-content: center;
           height: 100%;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
         }
 
         .board-header {
@@ -423,12 +423,12 @@ export function TaskBoard({ workspaceId, onTaskSelect }: TaskBoardProps) {
         .board-title h2 {
           margin: 0;
           font-size: 20px;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
         }
 
         .task-count {
           font-size: 13px;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
         }
 
         .board-filters {
@@ -439,32 +439,34 @@ export function TaskBoard({ workspaceId, onTaskSelect }: TaskBoardProps) {
 
         .board-filters select {
           padding: 8px 12px;
-          border: 1px solid var(--border-color);
+          border: 1px solid var(--color-border);
           border-radius: 6px;
-          background: var(--bg-secondary);
-          color: var(--text-primary);
+          background: var(--color-bg-secondary);
+          color: var(--color-text-primary);
           font-size: 12px;
           cursor: pointer;
+          transition: border-color 0.15s ease;
         }
 
         .board-filters select:focus {
           outline: none;
-          border-color: var(--accent-color);
+          border-color: var(--color-accent);
         }
 
         .manage-labels-btn {
           padding: 8px 14px;
-          background: var(--bg-secondary);
-          border: 1px solid var(--border-color);
+          background: var(--color-bg-secondary);
+          border: 1px solid var(--color-border);
           border-radius: 6px;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
           font-size: 12px;
           cursor: pointer;
+          transition: all 0.15s ease;
         }
 
         .manage-labels-btn:hover {
-          background: var(--bg-tertiary);
-          border-color: var(--accent-color);
+          background: var(--color-bg-tertiary);
+          border-color: var(--color-accent);
         }
 
         .board-columns {
@@ -480,17 +482,17 @@ export function TaskBoard({ workspaceId, onTaskSelect }: TaskBoardProps) {
         }
 
         .board-columns::-webkit-scrollbar-track {
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           border-radius: 4px;
         }
 
         .board-columns::-webkit-scrollbar-thumb {
-          background: var(--bg-tertiary);
+          background: var(--color-bg-tertiary);
           border-radius: 4px;
         }
 
         .board-columns::-webkit-scrollbar-thumb:hover {
-          background: var(--border-color);
+          background: var(--color-border);
         }
       `}</style>
     </div>

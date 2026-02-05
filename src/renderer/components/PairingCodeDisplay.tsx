@@ -143,9 +143,9 @@ export function PairingCodeDisplay({
           flex-direction: column;
           gap: 12px;
           padding: 16px;
-          background: var(--bg-secondary, #1a1a2e);
+          background: var(--color-bg-secondary, #1a1a2e);
           border-radius: 8px;
-          border: 1px solid var(--border-color, #2d2d44);
+          border: 1px solid var(--color-border, #2d2d44);
         }
 
         .code-container {
@@ -153,19 +153,19 @@ export function PairingCodeDisplay({
           align-items: center;
           justify-content: space-between;
           padding: 16px 20px;
-          background: var(--bg-tertiary, #0f0f1a);
+          background: var(--color-bg-tertiary, #0f0f1a);
           border-radius: 6px;
-          border: 2px solid var(--accent-color, #6366f1);
+          border: 2px solid var(--color-accent, #6366f1);
           transition: all 0.3s ease;
         }
 
         .code-container.expired {
-          border-color: var(--error-color, #ef4444);
+          border-color: var(--color-error, #ef4444);
           opacity: 0.6;
         }
 
         .code-container.expiring-soon {
-          border-color: var(--warning-color, #f59e0b);
+          border-color: var(--color-warning, #f59e0b);
           animation: pulse 1s ease-in-out infinite;
         }
 
@@ -179,7 +179,7 @@ export function PairingCodeDisplay({
           font-size: 32px;
           font-weight: 600;
           letter-spacing: 8px;
-          color: var(--text-primary, #fff);
+          color: var(--color-text-primary, #fff);
           user-select: all;
         }
 
@@ -195,18 +195,18 @@ export function PairingCodeDisplay({
           width: 40px;
           height: 40px;
           padding: 0;
-          background: var(--bg-secondary, #1a1a2e);
-          border: 1px solid var(--border-color, #2d2d44);
+          background: var(--color-bg-secondary, #1a1a2e);
+          border: 1px solid var(--color-border, #2d2d44);
           border-radius: 6px;
-          color: var(--text-secondary, #a0a0b0);
+          color: var(--color-text-secondary, #a0a0b0);
           cursor: pointer;
           transition: all 0.2s ease;
         }
 
         .copy-button:hover:not(:disabled) {
-          background: var(--accent-color, #6366f1);
+          background: var(--color-accent, #6366f1);
           color: white;
-          border-color: var(--accent-color, #6366f1);
+          border-color: var(--color-accent, #6366f1);
         }
 
         .copy-button:disabled {
@@ -220,16 +220,16 @@ export function PairingCodeDisplay({
         }
 
         .status-timer {
-          color: var(--text-secondary, #a0a0b0);
+          color: var(--color-text-secondary, #a0a0b0);
         }
 
         .status-timer.warning {
-          color: var(--warning-color, #f59e0b);
+          color: var(--color-warning, #f59e0b);
           font-weight: 500;
         }
 
         .status-expired {
-          color: var(--error-color, #ef4444);
+          color: var(--color-error, #ef4444);
           font-weight: 500;
         }
 
@@ -239,7 +239,7 @@ export function PairingCodeDisplay({
           justify-content: center;
           gap: 8px;
           padding: 10px 16px;
-          background: var(--accent-color, #6366f1);
+          background: var(--color-accent, #6366f1);
           border: none;
           border-radius: 6px;
           color: white;
@@ -250,7 +250,7 @@ export function PairingCodeDisplay({
         }
 
         .regenerate-button:hover:not(:disabled) {
-          background: var(--accent-hover, #5558e3);
+          background: var(--color-accent-hover, #5558e3);
         }
 
         .regenerate-button:disabled {
@@ -261,10 +261,10 @@ export function PairingCodeDisplay({
         .pairing-instructions {
           margin-top: 8px;
           padding: 12px;
-          background: var(--bg-tertiary, #0f0f1a);
+          background: var(--color-bg-tertiary, #0f0f1a);
           border-radius: 6px;
           font-size: 13px;
-          color: var(--text-secondary, #a0a0b0);
+          color: var(--color-text-secondary, #a0a0b0);
           line-height: 1.5;
         }
 

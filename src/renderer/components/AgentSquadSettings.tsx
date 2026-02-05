@@ -261,8 +261,8 @@ export function AgentSquadSettings({ onSettingsChanged }: AgentSquadSettingsProp
         .agent-squad-empty {
           text-align: center;
           padding: 40px;
-          color: var(--text-secondary);
-          background: var(--bg-secondary);
+          color: var(--color-text-secondary);
+          background: var(--color-bg-secondary);
           border-radius: 8px;
           margin-top: 16px;
         }
@@ -278,7 +278,7 @@ export function AgentSquadSettings({ onSettingsChanged }: AgentSquadSettingsProp
         .agent-role-group-title {
           font-size: 14px;
           font-weight: 600;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           margin: 0 0 12px 0;
           text-transform: uppercase;
           letter-spacing: 0.5px;

@@ -322,7 +322,7 @@ export function TaskQuickActions({
           }
 
           .task-quick-actions {
-            background: var(--bg-primary);
+            background: var(--color-bg-primary);
             border-radius: 12px;
             padding: 16px;
             width: 320px;
@@ -340,13 +340,13 @@ export function TaskQuickActions({
           .actions-header h4 {
             margin: 0;
             font-size: 14px;
-            color: var(--text-primary);
+            color: var(--color-text-primary);
           }
 
           .close-btn {
             background: none;
             border: none;
-            color: var(--text-secondary);
+            color: var(--color-text-secondary);
             cursor: pointer;
             font-size: 16px;
             padding: 4px;
@@ -363,22 +363,22 @@ export function TaskQuickActions({
             align-items: center;
             gap: 10px;
             padding: 10px 12px;
-            background: var(--bg-secondary);
+            background: var(--color-bg-secondary);
             border: 1px solid transparent;
             border-radius: 6px;
-            color: var(--text-primary);
+            color: var(--color-text-primary);
             cursor: pointer;
             font-size: 13px;
             text-align: left;
           }
 
           .action-btn:hover {
-            background: var(--bg-tertiary);
+            background: var(--color-bg-tertiary);
           }
 
           .action-btn.active {
-            border-color: var(--accent-color);
-            background: var(--bg-tertiary);
+            border-color: var(--color-accent);
+            background: var(--color-bg-tertiary);
           }
 
           .action-icon {
@@ -393,7 +393,7 @@ export function TaskQuickActions({
           .action-panel {
             margin-top: 12px;
             padding: 8px;
-            background: var(--bg-secondary);
+            background: var(--color-bg-secondary);
             border-radius: 8px;
             display: flex;
             flex-direction: column;
@@ -408,18 +408,18 @@ export function TaskQuickActions({
             background: transparent;
             border: none;
             border-radius: 4px;
-            color: var(--text-primary);
+            color: var(--color-text-primary);
             cursor: pointer;
             font-size: 13px;
             text-align: left;
           }
 
           .panel-option:hover {
-            background: var(--bg-tertiary);
+            background: var(--color-bg-tertiary);
           }
 
           .panel-option.selected {
-            background: var(--accent-color)20;
+            background: var(--color-accent)20;
           }
 
           .option-dot {
@@ -439,7 +439,7 @@ export function TaskQuickActions({
 
           .check-mark {
             margin-left: auto;
-            color: var(--accent-color);
+            color: var(--color-accent);
           }
 
           .agent-avatar {
@@ -455,7 +455,7 @@ export function TaskQuickActions({
 
           .panel-empty {
             text-align: center;
-            color: var(--text-secondary);
+            color: var(--color-text-secondary);
             padding: 16px;
             font-size: 13px;
           }
@@ -469,16 +469,16 @@ export function TaskQuickActions({
           .custom-date-row input {
             flex: 1;
             padding: 6px 8px;
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--color-border);
             border-radius: 4px;
-            background: var(--bg-primary);
-            color: var(--text-primary);
+            background: var(--color-bg-primary);
+            color: var(--color-text-primary);
             font-size: 12px;
           }
 
           .apply-btn {
             padding: 6px 12px;
-            background: var(--accent-color);
+            background: var(--color-accent);
             color: white;
             border: none;
             border-radius: 4px;

@@ -309,10 +309,10 @@ export function MentionList({
 
         .mention-filters select {
           padding: 6px 10px;
-          border: 1px solid var(--border-color);
+          border: 1px solid var(--color-border);
           border-radius: 6px;
-          background: var(--bg-primary);
-          color: var(--text-primary);
+          background: var(--color-bg-primary);
+          color: var(--color-text-primary);
           font-size: 12px;
         }
 
@@ -324,7 +324,7 @@ export function MentionList({
 
         .mention-item {
           padding: 12px;
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           border-radius: 8px;
           border-left: 3px solid transparent;
           cursor: pointer;
@@ -332,7 +332,7 @@ export function MentionList({
         }
 
         .mention-item:hover {
-          background: var(--bg-tertiary);
+          background: var(--color-bg-tertiary);
         }
 
         .mention-item.status-pending {
@@ -377,7 +377,7 @@ export function MentionList({
         }
 
         .mention-arrow {
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
           font-size: 12px;
         }
 
@@ -398,7 +398,7 @@ export function MentionList({
 
         .mention-time {
           font-size: 11px;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
         }
 
         .mention-body {
@@ -407,13 +407,13 @@ export function MentionList({
 
         .mention-from-to {
           font-size: 13px;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
           margin-bottom: 4px;
         }
 
         .mention-context {
           font-size: 12px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           margin: 0;
           white-space: pre-wrap;
         }
@@ -451,24 +451,24 @@ export function MentionList({
         }
 
         .btn-dismiss {
-          background: var(--bg-tertiary);
-          color: var(--text-secondary);
+          background: var(--color-bg-tertiary);
+          color: var(--color-text-secondary);
         }
 
         .btn-dismiss:hover {
-          background: var(--bg-primary);
+          background: var(--color-bg-primary);
         }
 
         .mention-empty {
           text-align: center;
           padding: 40px 20px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
         }
 
         .mention-loading {
           text-align: center;
           padding: 20px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
         }
       `}</style>
     </div>

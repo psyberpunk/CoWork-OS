@@ -432,7 +432,7 @@ export function AgentRoleEditor({
           gap: 6px;
           background: transparent;
           border: none;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           cursor: pointer;
           padding: 8px;
           border-radius: 6px;
@@ -440,14 +440,14 @@ export function AgentRoleEditor({
         }
 
         .btn-back:hover {
-          background: var(--bg-secondary);
-          color: var(--text-primary);
+          background: var(--color-bg-secondary);
+          color: var(--color-text-primary);
         }
 
         .editor-tabs {
           display: flex;
           gap: 4px;
-          border-bottom: 1px solid var(--border-color);
+          border-bottom: 1px solid var(--color-border);
           margin-bottom: 20px;
         }
 
@@ -455,7 +455,7 @@ export function AgentRoleEditor({
           background: transparent;
           border: none;
           padding: 10px 16px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           cursor: pointer;
           font-size: 14px;
           border-bottom: 2px solid transparent;
@@ -464,16 +464,16 @@ export function AgentRoleEditor({
         }
 
         .editor-tab:hover {
-          color: var(--text-primary);
+          color: var(--color-text-primary);
         }
 
         .editor-tab.active {
-          color: var(--accent-color);
-          border-bottom-color: var(--accent-color);
+          color: var(--color-accent);
+          border-bottom-color: var(--color-accent);
         }
 
         .editor-content {
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           border-radius: 8px;
           padding: 20px;
         }
@@ -485,7 +485,7 @@ export function AgentRoleEditor({
         }
 
         .section-description {
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           font-size: 13px;
           margin: 0 0 8px 0;
         }
@@ -499,21 +499,21 @@ export function AgentRoleEditor({
         .form-row label {
           font-size: 13px;
           font-weight: 500;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
         }
 
         .required {
-          color: var(--error-color);
+          color: var(--color-error);
         }
 
         .form-row input,
         .form-row textarea,
         .form-row select {
           padding: 10px 12px;
-          border: 1px solid var(--border-color);
+          border: 1px solid var(--color-border);
           border-radius: 6px;
-          background: var(--bg-primary);
-          color: var(--text-primary);
+          background: var(--color-bg-primary);
+          color: var(--color-text-primary);
           font-size: 14px;
         }
 
@@ -521,7 +521,7 @@ export function AgentRoleEditor({
         .form-row textarea:focus,
         .form-row select:focus {
           outline: none;
-          border-color: var(--accent-color);
+          border-color: var(--color-accent);
         }
 
         .form-row input.disabled {
@@ -531,7 +531,7 @@ export function AgentRoleEditor({
 
         .form-hint {
           font-size: 11px;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
         }
 
         .icon-color-row {
@@ -559,7 +559,7 @@ export function AgentRoleEditor({
         .color-button {
           width: 48px;
           height: 48px;
-          border: 2px solid var(--border-color);
+          border: 2px solid var(--color-border);
           border-radius: 10px;
           cursor: pointer;
         }
@@ -568,8 +568,8 @@ export function AgentRoleEditor({
           position: absolute;
           top: 100%;
           left: 0;
-          background: var(--bg-primary);
-          border: 1px solid var(--border-color);
+          background: var(--color-bg-primary);
+          border: 1px solid var(--color-border);
           border-radius: 8px;
           padding: 8px;
           z-index: 100;
@@ -590,18 +590,18 @@ export function AgentRoleEditor({
           border-radius: 6px;
           cursor: pointer;
           font-size: 16px;
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           display: flex;
           align-items: center;
           justify-content: center;
         }
 
         .picker-item:hover {
-          background: var(--bg-tertiary);
+          background: var(--color-bg-tertiary);
         }
 
         .picker-item.selected {
-          border-color: var(--accent-color);
+          border-color: var(--color-accent);
         }
 
         .picker-item.color {
@@ -626,20 +626,20 @@ export function AgentRoleEditor({
           align-items: center;
           gap: 10px;
           padding: 12px;
-          background: var(--bg-primary);
-          border: 2px solid var(--border-color);
+          background: var(--color-bg-primary);
+          border: 2px solid var(--color-border);
           border-radius: 8px;
           cursor: pointer;
           transition: all 0.15s ease;
         }
 
         .capability-option:hover {
-          border-color: var(--text-tertiary);
+          border-color: var(--color-text-muted);
         }
 
         .capability-option.selected {
-          border-color: var(--accent-color);
-          background: var(--bg-tertiary);
+          border-color: var(--color-accent);
+          background: var(--color-bg-tertiary);
         }
 
         .capability-option input {
@@ -653,7 +653,7 @@ export function AgentRoleEditor({
           display: flex;
           align-items: center;
           justify-content: center;
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           border-radius: 6px;
         }
 
@@ -665,13 +665,13 @@ export function AgentRoleEditor({
           display: block;
           font-weight: 600;
           font-size: 14px;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
         }
 
         .capability-description {
           display: block;
           font-size: 11px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           margin-top: 2px;
         }
 
@@ -686,20 +686,20 @@ export function AgentRoleEditor({
           display: flex;
           flex-direction: column;
           padding: 12px 16px;
-          background: var(--bg-primary);
-          border: 2px solid var(--border-color);
+          background: var(--color-bg-primary);
+          border: 2px solid var(--color-border);
           border-radius: 8px;
           cursor: pointer;
           transition: all 0.15s ease;
         }
 
         .autonomy-option:hover {
-          border-color: var(--text-tertiary);
+          border-color: var(--color-text-muted);
         }
 
         .autonomy-option.selected {
-          border-color: var(--accent-color);
-          background: var(--bg-tertiary);
+          border-color: var(--color-accent);
+          background: var(--color-bg-tertiary);
         }
 
         .autonomy-option input {
@@ -709,12 +709,12 @@ export function AgentRoleEditor({
         .autonomy-label {
           font-weight: 600;
           font-size: 14px;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
         }
 
         .autonomy-description {
           font-size: 12px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           margin-top: 4px;
         }
 
@@ -725,8 +725,8 @@ export function AgentRoleEditor({
         }
 
         .heartbeat-section {
-          background: var(--bg-primary);
-          border: 1px solid var(--border-color);
+          background: var(--color-bg-primary);
+          border: 1px solid var(--color-border);
           border-radius: 8px;
           padding: 16px;
           margin-top: 8px;
@@ -743,7 +743,7 @@ export function AgentRoleEditor({
           margin: 0;
           font-size: 14px;
           font-weight: 600;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
         }
 
         .toggle-switch {
@@ -765,7 +765,7 @@ export function AgentRoleEditor({
           left: 0;
           right: 0;
           bottom: 0;
-          background-color: var(--bg-tertiary);
+          background-color: var(--color-bg-tertiary);
           border-radius: 24px;
           transition: 0.2s;
         }
@@ -777,13 +777,13 @@ export function AgentRoleEditor({
           width: 18px;
           left: 3px;
           bottom: 3px;
-          background-color: var(--text-secondary);
+          background-color: var(--color-text-secondary);
           border-radius: 50%;
           transition: 0.2s;
         }
 
         .toggle-switch input:checked + .toggle-slider {
-          background-color: var(--accent-color);
+          background-color: var(--color-accent);
         }
 
         .toggle-switch input:checked + .toggle-slider:before {
@@ -797,7 +797,7 @@ export function AgentRoleEditor({
           gap: 16px;
           margin-top: 16px;
           padding-top: 16px;
-          border-top: 1px solid var(--border-color);
+          border-top: 1px solid var(--color-border);
         }
       `}</style>
     </div>

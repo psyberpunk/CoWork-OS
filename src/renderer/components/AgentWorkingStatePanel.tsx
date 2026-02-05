@@ -218,7 +218,7 @@ export function AgentWorkingStatePanel({
 
       <style>{`
         .working-state-panel {
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           border-radius: 12px;
           overflow: hidden;
         }
@@ -226,12 +226,12 @@ export function AgentWorkingStatePanel({
         .working-state-panel.loading {
           padding: 40px;
           text-align: center;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
         }
 
         .panel-header {
           padding: 16px;
-          border-bottom: 1px solid var(--border-color);
+          border-bottom: 1px solid var(--color-border);
         }
 
         .agent-info {
@@ -258,12 +258,12 @@ export function AgentWorkingStatePanel({
 
         .agent-name {
           font-weight: 600;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
         }
 
         .agent-context {
           font-size: 12px;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
         }
 
         .state-sections {
@@ -272,7 +272,7 @@ export function AgentWorkingStatePanel({
         }
 
         .state-section {
-          border-bottom: 1px solid var(--border-color);
+          border-bottom: 1px solid var(--color-border);
         }
 
         .state-section:last-child {
@@ -289,7 +289,7 @@ export function AgentWorkingStatePanel({
         }
 
         .section-header:hover {
-          background: var(--bg-tertiary);
+          background: var(--color-bg-tertiary);
         }
 
         .section-title {
@@ -304,12 +304,12 @@ export function AgentWorkingStatePanel({
 
         .section-name {
           font-weight: 500;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
         }
 
         .section-updated {
           font-size: 11px;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
           margin-left: 8px;
         }
 
@@ -322,21 +322,21 @@ export function AgentWorkingStatePanel({
         .edit-btn {
           padding: 4px 10px;
           font-size: 11px;
-          background: var(--bg-tertiary);
+          background: var(--color-bg-tertiary);
           border: none;
           border-radius: 4px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           cursor: pointer;
         }
 
         .edit-btn:hover {
-          background: var(--accent-color);
+          background: var(--color-accent);
           color: white;
         }
 
         .expand-icon {
           font-size: 10px;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
         }
 
         .section-content {
@@ -345,7 +345,7 @@ export function AgentWorkingStatePanel({
 
         .content-text {
           font-size: 13px;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
           white-space: pre-wrap;
           line-height: 1.6;
         }
@@ -360,20 +360,20 @@ export function AgentWorkingStatePanel({
 
         .ref-label {
           font-size: 11px;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
         }
 
         .file-ref {
           font-size: 11px;
-          color: var(--text-secondary);
-          background: var(--bg-primary);
+          color: var(--color-text-secondary);
+          background: var(--color-bg-primary);
           padding: 2px 8px;
           border-radius: 4px;
           font-family: monospace;
         }
 
         .empty-state {
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
           font-size: 13px;
         }
 
@@ -387,11 +387,11 @@ export function AgentWorkingStatePanel({
         }
 
         .state-section.empty .section-name {
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
         }
 
         .state-section.has-content .section-name {
-          color: var(--text-primary);
+          color: var(--color-text-primary);
         }
 
         .state-section.has-content .section-header::before {
@@ -401,7 +401,7 @@ export function AgentWorkingStatePanel({
           top: 0;
           bottom: 0;
           width: 3px;
-          background: var(--accent-color);
+          background: var(--color-accent);
         }
 
         .state-section {

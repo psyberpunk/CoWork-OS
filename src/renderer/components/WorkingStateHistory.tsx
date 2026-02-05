@@ -261,7 +261,7 @@ export function WorkingStateHistory({
           }
 
           .history-panel {
-            background: var(--bg-primary);
+            background: var(--color-bg-primary);
             border-radius: 12px;
             width: 600px;
             max-height: 80vh;
@@ -272,7 +272,7 @@ export function WorkingStateHistory({
           .history-loading {
             padding: 40px;
             text-align: center;
-            color: var(--text-secondary);
+            color: var(--color-text-secondary);
           }
 
           .history-header {
@@ -280,19 +280,19 @@ export function WorkingStateHistory({
             align-items: center;
             justify-content: space-between;
             padding: 16px 20px;
-            border-bottom: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--color-border);
           }
 
           .history-header h3 {
             margin: 0;
             font-size: 16px;
-            color: var(--text-primary);
+            color: var(--color-text-primary);
           }
 
           .close-btn {
             background: none;
             border: none;
-            color: var(--text-secondary);
+            color: var(--color-text-secondary);
             cursor: pointer;
             font-size: 18px;
             padding: 4px 8px;
@@ -303,21 +303,21 @@ export function WorkingStateHistory({
             align-items: center;
             justify-content: space-between;
             padding: 12px 20px;
-            border-bottom: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--color-border);
           }
 
           .history-filters select {
             padding: 8px 12px;
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--color-border);
             border-radius: 6px;
-            background: var(--bg-secondary);
-            color: var(--text-primary);
+            background: var(--color-bg-secondary);
+            color: var(--color-text-primary);
             font-size: 12px;
           }
 
           .history-count {
             font-size: 12px;
-            color: var(--text-tertiary);
+            color: var(--color-text-muted);
           }
 
           .history-list {
@@ -328,7 +328,7 @@ export function WorkingStateHistory({
 
           .history-empty {
             text-align: center;
-            color: var(--text-secondary);
+            color: var(--color-text-secondary);
             padding: 40px;
           }
 
@@ -343,21 +343,21 @@ export function WorkingStateHistory({
           .group-header {
             font-size: 12px;
             font-weight: 600;
-            color: var(--text-tertiary);
+            color: var(--color-text-muted);
             text-transform: uppercase;
             letter-spacing: 0.5px;
             margin-bottom: 8px;
           }
 
           .history-item {
-            background: var(--bg-secondary);
+            background: var(--color-bg-secondary);
             border-radius: 8px;
             margin-bottom: 8px;
             overflow: hidden;
           }
 
           .history-item.current {
-            border-left: 3px solid var(--accent-color);
+            border-left: 3px solid var(--color-accent);
           }
 
           .item-header {
@@ -369,7 +369,7 @@ export function WorkingStateHistory({
           }
 
           .item-header:hover {
-            background: var(--bg-tertiary);
+            background: var(--color-bg-tertiary);
           }
 
           .item-info {
@@ -384,18 +384,18 @@ export function WorkingStateHistory({
 
           .item-type {
             font-weight: 500;
-            color: var(--text-primary);
+            color: var(--color-text-primary);
           }
 
           .item-time {
             font-size: 11px;
-            color: var(--text-tertiary);
+            color: var(--color-text-muted);
           }
 
           .current-badge {
             font-size: 10px;
-            color: var(--accent-color);
-            background: var(--accent-color)20;
+            color: var(--color-accent);
+            background: var(--color-accent)20;
             padding: 2px 6px;
             border-radius: 4px;
             font-weight: 500;
@@ -403,7 +403,7 @@ export function WorkingStateHistory({
 
           .expand-icon {
             font-size: 10px;
-            color: var(--text-tertiary);
+            color: var(--color-text-muted);
           }
 
           .item-content {
@@ -412,10 +412,10 @@ export function WorkingStateHistory({
 
           .content-preview {
             font-size: 12px;
-            color: var(--text-secondary);
+            color: var(--color-text-secondary);
             line-height: 1.5;
             white-space: pre-wrap;
-            background: var(--bg-primary);
+            background: var(--color-bg-primary);
             padding: 12px;
             border-radius: 6px;
           }
@@ -430,13 +430,13 @@ export function WorkingStateHistory({
 
           .refs-label {
             font-size: 11px;
-            color: var(--text-tertiary);
+            color: var(--color-text-muted);
           }
 
           .file-ref {
             font-size: 10px;
-            color: var(--text-secondary);
-            background: var(--bg-primary);
+            color: var(--color-text-secondary);
+            background: var(--color-bg-primary);
             padding: 2px 6px;
             border-radius: 3px;
             font-family: monospace;
@@ -458,7 +458,7 @@ export function WorkingStateHistory({
           }
 
           .restore-btn {
-            background: var(--accent-color);
+            background: var(--color-accent);
             color: white;
           }
 
@@ -468,8 +468,8 @@ export function WorkingStateHistory({
           }
 
           .delete-btn {
-            background: var(--bg-tertiary);
-            color: var(--text-secondary);
+            background: var(--color-bg-tertiary);
+            color: var(--color-text-secondary);
           }
 
           .delete-btn:hover {

@@ -901,18 +901,18 @@ export function ControlPlaneSettings() {
           align-items: flex-start;
           gap: 0.75rem;
           padding: 1rem;
-          border: 1px solid var(--border-color);
+          border: 1px solid var(--color-border);
           border-radius: 8px;
           cursor: pointer;
           transition: all 0.2s;
         }
 
         .mode-option:hover {
-          border-color: var(--accent-color);
+          border-color: var(--color-accent);
         }
 
         .mode-option.selected {
-          border-color: var(--accent-color);
+          border-color: var(--color-accent);
           background: var(--accent-color-light, rgba(var(--accent-rgb), 0.1));
         }
 
@@ -932,11 +932,11 @@ export function ControlPlaneSettings() {
 
         .mode-description {
           font-size: 0.85rem;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
         }
 
         .status-card {
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           border-radius: 8px;
           padding: 1rem;
           margin: 0.5rem 0;
@@ -953,7 +953,7 @@ export function ControlPlaneSettings() {
           width: 10px;
           height: 10px;
           border-radius: 50%;
-          background: var(--text-secondary);
+          background: var(--color-text-secondary);
         }
 
         .status-dot.running {
@@ -987,12 +987,12 @@ export function ControlPlaneSettings() {
         }
 
         .detail-row .label {
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           min-width: 100px;
         }
 
         .detail-row code {
-          background: var(--bg-tertiary);
+          background: var(--color-bg-tertiary);
           padding: 0.25rem 0.5rem;
           border-radius: 4px;
           font-size: 0.85rem;
@@ -1013,7 +1013,7 @@ export function ControlPlaneSettings() {
           display: flex;
           align-items: center;
           gap: 0.5rem;
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           padding: 0.75rem 1rem;
           border-radius: 6px;
           margin: 0.5rem 0;
@@ -1028,15 +1028,15 @@ export function ControlPlaneSettings() {
         .copy-btn {
           padding: 0.25rem 0.5rem;
           font-size: 0.75rem;
-          background: var(--bg-tertiary);
+          background: var(--color-bg-tertiary);
           border: none;
           border-radius: 4px;
           cursor: pointer;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
         }
 
         .copy-btn:hover {
-          background: var(--accent-color);
+          background: var(--color-accent);
           color: white;
         }
 
@@ -1047,7 +1047,7 @@ export function ControlPlaneSettings() {
         }
 
         .btn-primary {
-          background: var(--accent-color);
+          background: var(--color-accent);
           color: white;
           border: none;
           padding: 0.5rem 1rem;
@@ -1060,22 +1060,22 @@ export function ControlPlaneSettings() {
         }
 
         .btn-secondary {
-          background: var(--bg-secondary);
-          color: var(--text-primary);
-          border: 1px solid var(--border-color);
+          background: var(--color-bg-secondary);
+          color: var(--color-text-primary);
+          border: 1px solid var(--color-border);
           padding: 0.5rem 1rem;
           border-radius: 6px;
           cursor: pointer;
         }
 
         .btn-secondary:hover:not(:disabled) {
-          background: var(--bg-tertiary);
+          background: var(--color-bg-tertiary);
         }
 
         .btn-icon {
           padding: 0.5rem;
-          background: var(--bg-secondary);
-          border: 1px solid var(--border-color);
+          background: var(--color-bg-secondary);
+          border: 1px solid var(--color-border);
           border-radius: 4px;
           cursor: pointer;
           font-size: 0.75rem;
@@ -1103,17 +1103,17 @@ export function ControlPlaneSettings() {
 
         .hint {
           font-size: 0.85rem;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           margin: 0.5rem 0;
         }
 
         .settings-input {
           width: 100%;
           padding: 0.5rem;
-          border: 1px solid var(--border-color);
+          border: 1px solid var(--color-border);
           border-radius: 4px;
-          background: var(--bg-primary);
-          color: var(--text-primary);
+          background: var(--color-bg-primary);
+          color: var(--color-text-primary);
         }
 
         .settings-input:disabled {

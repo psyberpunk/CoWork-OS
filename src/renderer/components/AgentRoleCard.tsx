@@ -139,7 +139,7 @@ export function AgentRoleCard({
 
       <style>{`
         .agent-role-card {
-          background: var(--bg-secondary);
+          background: var(--color-bg-secondary);
           border: 2px solid transparent;
           border-radius: 8px;
           padding: 12px;
@@ -147,12 +147,12 @@ export function AgentRoleCard({
         }
 
         .agent-role-card:hover {
-          background: var(--bg-tertiary);
+          background: var(--color-bg-tertiary);
         }
 
         .agent-role-card.selected {
-          border-color: var(--accent-color) !important;
-          background: var(--bg-tertiary);
+          border-color: var(--color-accent) !important;
+          background: var(--color-bg-tertiary);
         }
 
         .agent-role-card.inactive {
@@ -198,7 +198,7 @@ export function AgentRoleCard({
           gap: 6px;
           font-weight: 600;
           font-size: 14px;
-          color: var(--text-primary);
+          color: var(--color-text-primary);
           flex-wrap: wrap;
         }
 
@@ -210,19 +210,19 @@ export function AgentRoleCard({
         }
 
         .agent-role-badge.system {
-          background: var(--accent-color);
+          background: var(--color-accent);
           color: white;
         }
 
         .agent-role-badge.inactive {
-          background: var(--text-tertiary);
-          color: var(--bg-primary);
+          background: var(--color-text-muted);
+          color: var(--color-bg-primary);
         }
 
         .agent-role-description {
           display: block;
           font-size: 12px;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           margin-top: 2px;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -253,7 +253,7 @@ export function AgentRoleCard({
           left: 0;
           right: 0;
           bottom: 0;
-          background-color: var(--bg-tertiary);
+          background-color: var(--color-bg-tertiary);
           transition: 0.2s;
           border-radius: 20px;
         }
@@ -271,7 +271,7 @@ export function AgentRoleCard({
         }
 
         input:checked + .toggle-slider {
-          background-color: var(--accent-color);
+          background-color: var(--color-accent);
         }
 
         input:checked + .toggle-slider:before {
@@ -287,8 +287,8 @@ export function AgentRoleCard({
 
         .agent-capability-tag {
           font-size: 11px;
-          background: var(--bg-tertiary);
-          color: var(--text-secondary);
+          background: var(--color-bg-tertiary);
+          color: var(--color-text-secondary);
           padding: 2px 6px;
           border-radius: 4px;
           display: flex;
@@ -299,7 +299,7 @@ export function AgentRoleCard({
         .agent-role-model {
           margin-top: 8px;
           font-size: 11px;
-          color: var(--text-tertiary);
+          color: var(--color-text-muted);
         }
 
         .model-label {
@@ -307,7 +307,7 @@ export function AgentRoleCard({
         }
 
         .model-value {
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           font-family: monospace;
         }
 
@@ -316,7 +316,7 @@ export function AgentRoleCard({
           gap: 4px;
           margin-top: 10px;
           padding-top: 10px;
-          border-top: 1px solid var(--border-color);
+          border-top: 1px solid var(--color-border);
         }
 
         .btn-icon {
@@ -325,17 +325,17 @@ export function AgentRoleCard({
           padding: 6px;
           border-radius: 4px;
           cursor: pointer;
-          color: var(--text-secondary);
+          color: var(--color-text-secondary);
           transition: all 0.15s ease;
         }
 
         .btn-icon:hover {
-          background: var(--bg-tertiary);
-          color: var(--text-primary);
+          background: var(--color-bg-tertiary);
+          color: var(--color-text-primary);
         }
 
         .btn-icon-danger:hover {
-          color: var(--error-color);
+          color: var(--color-error);
         }
       `}</style>
     </div>

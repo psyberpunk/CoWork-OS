@@ -240,7 +240,7 @@ export function TaskLabelManager({ workspaceId, onClose }: TaskLabelManagerProps
           }
 
           .label-manager {
-            background: var(--bg-primary);
+            background: var(--color-bg-primary);
             border-radius: 12px;
             padding: 20px;
             width: 400px;
@@ -259,20 +259,20 @@ export function TaskLabelManager({ workspaceId, onClose }: TaskLabelManagerProps
           .label-manager-header h3 {
             margin: 0;
             font-size: 16px;
-            color: var(--text-primary);
+            color: var(--color-text-primary);
           }
 
           .close-btn {
             background: none;
             border: none;
-            color: var(--text-secondary);
+            color: var(--color-text-secondary);
             cursor: pointer;
             font-size: 18px;
             padding: 4px 8px;
           }
 
           .close-btn:hover {
-            color: var(--text-primary);
+            color: var(--color-text-primary);
           }
 
           .label-error {
@@ -297,34 +297,34 @@ export function TaskLabelManager({ workspaceId, onClose }: TaskLabelManagerProps
           .color-picker-btn {
             width: 32px;
             height: 32px;
-            border: 2px solid var(--border-color);
+            border: 2px solid var(--color-border);
             border-radius: 6px;
             cursor: pointer;
             flex-shrink: 0;
           }
 
           .color-picker-btn:hover {
-            border-color: var(--accent-color);
+            border-color: var(--color-accent);
           }
 
           .label-create-form input {
             flex: 1;
             padding: 8px 12px;
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--color-border);
             border-radius: 6px;
-            background: var(--bg-secondary);
-            color: var(--text-primary);
+            background: var(--color-bg-secondary);
+            color: var(--color-text-primary);
             font-size: 13px;
           }
 
           .label-create-form input:focus {
             outline: none;
-            border-color: var(--accent-color);
+            border-color: var(--color-accent);
           }
 
           .create-btn {
             padding: 8px 16px;
-            background: var(--accent-color);
+            background: var(--color-accent);
             color: white;
             border: none;
             border-radius: 6px;
@@ -348,7 +348,7 @@ export function TaskLabelManager({ workspaceId, onClose }: TaskLabelManagerProps
             gap: 6px;
             margin-top: 8px;
             padding: 8px;
-            background: var(--bg-secondary);
+            background: var(--color-bg-secondary);
             border-radius: 6px;
           }
 
@@ -363,7 +363,7 @@ export function TaskLabelManager({ workspaceId, onClose }: TaskLabelManagerProps
           .color-option:hover,
           .color-option.selected {
             border-color: white;
-            box-shadow: 0 0 0 1px var(--border-color);
+            box-shadow: 0 0 0 1px var(--color-border);
           }
 
           .label-list {
@@ -376,7 +376,7 @@ export function TaskLabelManager({ workspaceId, onClose }: TaskLabelManagerProps
 
           .label-empty {
             text-align: center;
-            color: var(--text-secondary);
+            color: var(--color-text-secondary);
             padding: 20px;
           }
 
@@ -385,7 +385,7 @@ export function TaskLabelManager({ workspaceId, onClose }: TaskLabelManagerProps
             align-items: center;
             justify-content: space-between;
             padding: 8px;
-            background: var(--bg-secondary);
+            background: var(--color-bg-secondary);
             border-radius: 6px;
           }
 
@@ -414,18 +414,18 @@ export function TaskLabelManager({ workspaceId, onClose }: TaskLabelManagerProps
           }
 
           .edit-btn {
-            background: var(--bg-tertiary);
-            color: var(--text-secondary);
+            background: var(--color-bg-tertiary);
+            color: var(--color-text-secondary);
           }
 
           .edit-btn:hover {
-            background: var(--accent-color);
+            background: var(--color-accent);
             color: white;
           }
 
           .delete-btn {
-            background: var(--bg-tertiary);
-            color: var(--text-secondary);
+            background: var(--color-bg-tertiary);
+            color: var(--color-text-secondary);
           }
 
           .delete-btn:hover {
@@ -434,13 +434,13 @@ export function TaskLabelManager({ workspaceId, onClose }: TaskLabelManagerProps
           }
 
           .save-btn {
-            background: var(--accent-color);
+            background: var(--color-accent);
             color: white;
           }
 
           .cancel-btn {
-            background: var(--bg-tertiary);
-            color: var(--text-secondary);
+            background: var(--color-bg-tertiary);
+            color: var(--color-text-secondary);
           }
 
           .label-edit-row {
@@ -453,16 +453,16 @@ export function TaskLabelManager({ workspaceId, onClose }: TaskLabelManagerProps
           .label-edit-row input {
             flex: 1;
             padding: 6px 10px;
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--color-border);
             border-radius: 4px;
-            background: var(--bg-primary);
-            color: var(--text-primary);
+            background: var(--color-bg-primary);
+            color: var(--color-text-primary);
             font-size: 12px;
           }
 
           .label-manager-loading {
             text-align: center;
-            color: var(--text-secondary);
+            color: var(--color-text-secondary);
             padding: 40px;
           }
         `}</style>
