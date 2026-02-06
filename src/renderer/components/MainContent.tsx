@@ -387,7 +387,7 @@ const renderHeading = (Tag: 'h1' | 'h2' | 'h3') => {
     const icon = emoji ? getHeadingIcon(emoji) : null;
     return (
       <Tag {...props}>
-        {icon && <span className="markdown-heading-icon"><ThemeIcon emoji={emoji} icon={icon} /></span>}
+        {icon && emoji && <span className="markdown-heading-icon"><ThemeIcon emoji={emoji} icon={icon} /></span>}
         {nodes}
       </Tag>
     );
