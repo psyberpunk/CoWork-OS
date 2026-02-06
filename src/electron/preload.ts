@@ -1,5 +1,20 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { LLMProviderType } from '../shared/types';
+import type {
+  AgentTeam,
+  AgentTeamItem,
+  AgentTeamMember,
+  AgentTeamRun,
+  CreateAgentTeamItemRequest,
+  CreateAgentTeamMemberRequest,
+  CreateAgentTeamRequest,
+  CreateAgentTeamRunRequest,
+  LLMProviderType,
+  MemoryFeaturesSettings,
+  UpdateAgentTeamItemRequest,
+  UpdateAgentTeamMemberRequest,
+  UpdateAgentTeamRequest,
+  Workspace,
+} from '../shared/types';
 
 // IPC Channel names - inlined to avoid require() issues in sandboxed preload
 const IPC_CHANNELS = {
@@ -285,6 +300,10 @@ const IPC_CHANNELS = {
   MEMORY_CLEAR: 'memory:clear',
   MEMORY_EVENT: 'memory:event',
 
+  // Memory Features (global toggles)
+  MEMORY_FEATURES_GET_SETTINGS: 'memoryFeatures:getSettings',
+  MEMORY_FEATURES_SAVE_SETTINGS: 'memoryFeatures:saveSettings',
+
   // Migration Status (for showing one-time notifications after app rename)
   MIGRATION_GET_STATUS: 'migration:getStatus',
   MIGRATION_DISMISS_NOTIFICATION: 'migration:dismissNotification',
@@ -313,6 +332,28 @@ const IPC_CHANNELS = {
   AGENT_ROLE_GET_DEFAULTS: 'agentRole:getDefaults',
   AGENT_ROLE_SEED_DEFAULTS: 'agentRole:seedDefaults',
   AGENT_ROLE_SYNC_DEFAULTS: 'agentRole:syncDefaults',
+
+  // Agent Teams
+  TEAM_LIST: 'team:list',
+  TEAM_CREATE: 'team:create',
+  TEAM_UPDATE: 'team:update',
+  TEAM_DELETE: 'team:delete',
+  TEAM_MEMBER_LIST: 'teamMember:list',
+  TEAM_MEMBER_ADD: 'teamMember:add',
+  TEAM_MEMBER_UPDATE: 'teamMember:update',
+  TEAM_MEMBER_REMOVE: 'teamMember:remove',
+  TEAM_MEMBER_REORDER: 'teamMember:reorder',
+  TEAM_RUN_LIST: 'teamRun:list',
+  TEAM_RUN_CREATE: 'teamRun:create',
+  TEAM_RUN_RESUME: 'teamRun:resume',
+  TEAM_RUN_PAUSE: 'teamRun:pause',
+  TEAM_RUN_CANCEL: 'teamRun:cancel',
+  TEAM_ITEM_LIST: 'teamItem:list',
+  TEAM_ITEM_CREATE: 'teamItem:create',
+  TEAM_ITEM_UPDATE: 'teamItem:update',
+  TEAM_ITEM_DELETE: 'teamItem:delete',
+  TEAM_ITEM_MOVE: 'teamItem:move',
+  TEAM_RUN_EVENT: 'teamRun:event',
   // Activity Feed
   ACTIVITY_LIST: 'activity:list',
   ACTIVITY_CREATE: 'activity:create',
@@ -835,14 +876,28 @@ interface Memory {
   updatedAt: number;
 }
 
-interface MemorySearchResult {
-  id: string;
-  snippet: string;
-  type: MemoryType;
-  relevanceScore: number;
-  createdAt: number;
-  taskId?: string;
-}
+type MemorySearchResult =
+  | {
+      id: string;
+      snippet: string;
+      type: MemoryType;
+      relevanceScore: number;
+      createdAt: number;
+      taskId?: string;
+      source: 'db';
+    }
+  | {
+      id: string;
+      snippet: string;
+      type: MemoryType;
+      relevanceScore: number;
+      createdAt: number;
+      taskId?: string;
+      source: 'markdown';
+      path: string;
+      startLine: number;
+      endLine: number;
+    };
 
 interface MemoryTimelineEntry {
   id: string;
@@ -1936,6 +1991,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MEMORY_EVENT, subscription);
   },
 
+  // Memory Features APIs
+  getMemoryFeaturesSettings: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_FEATURES_GET_SETTINGS),
+  saveMemoryFeaturesSettings: (settings: MemoryFeaturesSettings) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_FEATURES_SAVE_SETTINGS, settings),
+
   // Migration Status APIs
   getMigrationStatus: () => ipcRenderer.invoke(IPC_CHANNELS.MIGRATION_GET_STATUS),
   dismissMigrationNotification: () => ipcRenderer.invoke(IPC_CHANNELS.MIGRATION_DISMISS_NOTIFICATION),
@@ -2000,6 +2060,51 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_SEED_DEFAULTS),
   syncDefaultAgentRoles: () =>
     ipcRenderer.invoke(IPC_CHANNELS.AGENT_ROLE_SYNC_DEFAULTS),
+
+  // Agent Teams APIs
+  listTeams: (workspaceId: string, includeInactive?: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_LIST, workspaceId, includeInactive),
+  createTeam: (request: CreateAgentTeamRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_CREATE, request),
+  updateTeam: (request: UpdateAgentTeamRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_UPDATE, request),
+  deleteTeam: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_DELETE, id),
+  listTeamMembers: (teamId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_MEMBER_LIST, teamId),
+  addTeamMember: (request: CreateAgentTeamMemberRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_MEMBER_ADD, request),
+  updateTeamMember: (request: UpdateAgentTeamMemberRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_MEMBER_UPDATE, request),
+  removeTeamMember: (teamId: string, agentRoleId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_MEMBER_REMOVE, { teamId, agentRoleId }),
+  reorderTeamMembers: (teamId: string, orderedMemberIds: string[]) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_MEMBER_REORDER, { teamId, orderedMemberIds }),
+  listTeamRuns: (teamId: string, limit?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_RUN_LIST, { teamId, limit }),
+  createTeamRun: (request: CreateAgentTeamRunRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_RUN_CREATE, request),
+  resumeTeamRun: (runId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_RUN_RESUME, runId),
+  pauseTeamRun: (runId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_RUN_PAUSE, runId),
+  cancelTeamRun: (runId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_RUN_CANCEL, runId),
+  listTeamItems: (teamRunId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_ITEM_LIST, teamRunId),
+  createTeamItem: (request: CreateAgentTeamItemRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_ITEM_CREATE, request),
+  updateTeamItem: (request: UpdateAgentTeamItemRequest) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_ITEM_UPDATE, request),
+  deleteTeamItem: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_ITEM_DELETE, id),
+  moveTeamItem: (request: { id: string; parentItemId: string | null; sortOrder: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TEAM_ITEM_MOVE, request),
+  onTeamRunEvent: (callback: (event: any) => void) => {
+    const subscription = (_: Electron.IpcRendererEvent, data: any) => callback(data);
+    ipcRenderer.on(IPC_CHANNELS.TEAM_RUN_EVENT, subscription);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.TEAM_RUN_EVENT, subscription);
+  },
 
   // Activity Feed APIs
   listActivities: (query: ActivityListQuery) =>
@@ -2272,10 +2377,10 @@ export interface ElectronAPI {
   onTaskEvent: (callback: (event: any) => void) => () => void;
   getTaskEvents: (taskId: string) => Promise<any[]>;
   sendMessage: (taskId: string, message: string) => Promise<void>;
-  createWorkspace: (data: any) => Promise<any>;
-  listWorkspaces: () => Promise<any[]>;
-  selectWorkspace: (id: string) => Promise<any>;
-  getTempWorkspace: () => Promise<any>;
+  createWorkspace: (data: any) => Promise<Workspace>;
+  listWorkspaces: () => Promise<Workspace[]>;
+  selectWorkspace: (id: string) => Promise<Workspace>;
+  getTempWorkspace: () => Promise<Workspace | null>;
   touchWorkspace: (id: string) => Promise<any>;
   updateWorkspacePermissions: (id: string, permissions: { shell?: boolean; network?: boolean }) => Promise<any>;
   respondToApproval: (data: any) => Promise<void>;
@@ -2801,6 +2906,10 @@ export interface ElectronAPI {
   clearMemory: (workspaceId: string) => Promise<{ success: boolean }>;
   onMemoryEvent: (callback: (event: { type: string; workspaceId: string }) => void) => () => void;
 
+  // Memory Features (global toggles)
+  getMemoryFeaturesSettings: () => Promise<MemoryFeaturesSettings>;
+  saveMemoryFeaturesSettings: (settings: MemoryFeaturesSettings) => Promise<{ success: boolean }>;
+
   // Migration Status
   getMigrationStatus: () => Promise<MigrationStatus>;
   dismissMigrationNotification: () => Promise<{ success: boolean }>;
@@ -2829,6 +2938,28 @@ export interface ElectronAPI {
   assignAgentRoleToTask: (taskId: string, agentRoleId: string | null) => Promise<boolean>;
   getDefaultAgentRoles: () => Promise<Omit<AgentRoleData, 'id' | 'createdAt' | 'updatedAt'>[]>;
   seedDefaultAgentRoles: () => Promise<AgentRoleData[]>;
+
+  // Agent Teams
+  listTeams: (workspaceId: string, includeInactive?: boolean) => Promise<AgentTeam[]>;
+  createTeam: (request: CreateAgentTeamRequest) => Promise<AgentTeam>;
+  updateTeam: (request: UpdateAgentTeamRequest) => Promise<AgentTeam | undefined>;
+  deleteTeam: (id: string) => Promise<{ success: boolean }>;
+  listTeamMembers: (teamId: string) => Promise<AgentTeamMember[]>;
+  addTeamMember: (request: CreateAgentTeamMemberRequest) => Promise<AgentTeamMember>;
+  updateTeamMember: (request: UpdateAgentTeamMemberRequest) => Promise<AgentTeamMember | undefined>;
+  removeTeamMember: (teamId: string, agentRoleId: string) => Promise<{ success: boolean }>;
+  reorderTeamMembers: (teamId: string, orderedMemberIds: string[]) => Promise<AgentTeamMember[]>;
+  listTeamRuns: (teamId: string, limit?: number) => Promise<AgentTeamRun[]>;
+  createTeamRun: (request: CreateAgentTeamRunRequest) => Promise<AgentTeamRun>;
+  resumeTeamRun: (runId: string) => Promise<{ success: boolean }>;
+  pauseTeamRun: (runId: string) => Promise<{ success: boolean }>;
+  cancelTeamRun: (runId: string) => Promise<{ success: boolean }>;
+  listTeamItems: (teamRunId: string) => Promise<AgentTeamItem[]>;
+  createTeamItem: (request: CreateAgentTeamItemRequest) => Promise<AgentTeamItem>;
+  updateTeamItem: (request: UpdateAgentTeamItemRequest) => Promise<AgentTeamItem | undefined>;
+  deleteTeamItem: (id: string) => Promise<{ success: boolean }>;
+  moveTeamItem: (request: { id: string; parentItemId: string | null; sortOrder: number }) => Promise<AgentTeamItem | undefined>;
+  onTeamRunEvent: (callback: (event: any) => void) => () => void;
 
   // Activity Feed
   listActivities: (query: ActivityListQuery) => Promise<ActivityData[]>;
@@ -2979,8 +3110,11 @@ export interface VoiceSettingsData {
   ttsProvider: VoiceProvider;
   sttProvider: VoiceProvider;
   elevenLabsApiKey?: string;
+  elevenLabsAgentsApiKey?: string;
   openaiApiKey?: string;
   elevenLabsVoiceId?: string;
+  elevenLabsAgentId?: string;
+  elevenLabsAgentPhoneNumberId?: string;
   openaiVoice?: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
   /** Azure OpenAI endpoint URL */
   azureEndpoint?: string;

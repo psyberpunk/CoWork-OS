@@ -24,6 +24,14 @@ export interface TraySettings {
   showNotifications: boolean;
 }
 
+// Global memory feature toggles (applies across workspaces)
+export interface MemoryFeaturesSettings {
+  /** Inject `.cowork/*` context pack into the agent prompt (workspace-scoped files). */
+  contextPackInjectionEnabled: boolean;
+  /** Allow the heartbeat system to perform memory maintenance tasks. */
+  heartbeatMaintenanceEnabled: boolean;
+}
+
 export const ACCENT_COLORS: { id: AccentColor; label: string }[] = [
   { id: 'cyan', label: 'Cyan' },
   { id: 'blue', label: 'Blue' },
@@ -124,6 +132,7 @@ export type ToolType =
   | 'get_app_paths'
   // Network/Browser tools
   | 'web_search'
+  | 'voice_call'
   | 'browser_navigate'
   | 'browser_screenshot'
   | 'browser_get_content'
@@ -219,6 +228,7 @@ export const TOOL_GROUPS = {
   // Network operations - requires network permission
   'group:network': [
     'web_search',
+    'voice_call',
     'x_action',
     'notion_action',
     'box_action',
@@ -295,6 +305,7 @@ export const TOOL_RISK_LEVELS: Record<ToolType, ToolRiskLevel> = {
   // Network operations
   generate_image: 'network',
   web_search: 'network',
+  voice_call: 'network',
   browser_navigate: 'network',
   browser_screenshot: 'network',
   browser_get_content: 'network',
@@ -386,6 +397,10 @@ export interface AgentConfig {
   modelKey?: string;
   /** Override the personality for this agent */
   personalityId?: PersonalityId;
+  /** Gateway context for context-aware tool restrictions (e.g., memory isolation in group/public chats) */
+  gatewayContext?: GatewayContextType;
+  /** Additional tool restrictions for this task (e.g., per-channel DM/group policies) */
+  toolRestrictions?: string[];
   /** Maximum number of LLM turns before forcing completion (for sub-agents) */
   maxTurns?: number;
   /** Maximum tokens budget for this agent */
@@ -698,6 +713,139 @@ export interface UpdateAgentRoleRequest {
   heartbeatEnabled?: boolean;
   heartbeatIntervalMinutes?: number;
   heartbeatStaggerOffset?: number;
+}
+
+// ============ Agent Teams (Mission Control) ============
+
+/**
+ * Agent team = a lead agent role plus member roles.
+ * Used for orchestrated runs and shared checklists.
+ */
+export interface AgentTeam {
+  id: string;
+  workspaceId: string;
+  name: string;
+  description?: string;
+  leadAgentRoleId: string;
+  maxParallelAgents: number;
+  defaultModelPreference?: string;
+  defaultPersonality?: string;
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateAgentTeamRequest {
+  workspaceId: string;
+  name: string;
+  description?: string;
+  leadAgentRoleId: string;
+  maxParallelAgents?: number;
+  defaultModelPreference?: string;
+  defaultPersonality?: string;
+  isActive?: boolean;
+}
+
+export interface UpdateAgentTeamRequest {
+  id: string;
+  name?: string;
+  description?: string | null;
+  leadAgentRoleId?: string;
+  maxParallelAgents?: number;
+  defaultModelPreference?: string | null;
+  defaultPersonality?: string | null;
+  isActive?: boolean;
+}
+
+export interface AgentTeamMember {
+  id: string;
+  teamId: string;
+  agentRoleId: string;
+  memberOrder: number;
+  isRequired: boolean;
+  roleGuidance?: string;
+  createdAt: number;
+}
+
+export interface CreateAgentTeamMemberRequest {
+  teamId: string;
+  agentRoleId: string;
+  memberOrder?: number;
+  isRequired?: boolean;
+  roleGuidance?: string;
+}
+
+export interface UpdateAgentTeamMemberRequest {
+  id: string;
+  memberOrder?: number;
+  isRequired?: boolean;
+  roleGuidance?: string | null;
+}
+
+export type AgentTeamRunStatus =
+  | 'pending'
+  | 'running'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+export interface AgentTeamRun {
+  id: string;
+  teamId: string;
+  rootTaskId: string;
+  status: AgentTeamRunStatus;
+  startedAt: number;
+  completedAt?: number;
+  error?: string;
+  summary?: string;
+}
+
+export interface CreateAgentTeamRunRequest {
+  teamId: string;
+  rootTaskId: string;
+  status?: AgentTeamRunStatus;
+  startedAt?: number;
+}
+
+export type AgentTeamItemStatus = 'todo' | 'in_progress' | 'blocked' | 'done' | 'failed';
+
+export interface AgentTeamItem {
+  id: string;
+  teamRunId: string;
+  parentItemId?: string;
+  title: string;
+  description?: string;
+  ownerAgentRoleId?: string;
+  sourceTaskId?: string;
+  status: AgentTeamItemStatus;
+  resultSummary?: string;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CreateAgentTeamItemRequest {
+  teamRunId: string;
+  parentItemId?: string;
+  title: string;
+  description?: string;
+  ownerAgentRoleId?: string;
+  sourceTaskId?: string;
+  status?: AgentTeamItemStatus;
+  sortOrder?: number;
+}
+
+export interface UpdateAgentTeamItemRequest {
+  id: string;
+  parentItemId?: string | null;
+  title?: string;
+  description?: string | null;
+  ownerAgentRoleId?: string | null;
+  sourceTaskId?: string | null;
+  status?: AgentTeamItemStatus;
+  resultSummary?: string | null;
+  sortOrder?: number;
 }
 
 /**
@@ -1598,6 +1746,10 @@ export const IPC_CHANNELS = {
   MEMORY_GET_STATS: 'memory:getStats',
   MEMORY_CLEAR: 'memory:clear',
   MEMORY_EVENT: 'memory:event',
+
+  // Memory Features (Global Toggles)
+  MEMORY_FEATURES_GET_SETTINGS: 'memoryFeatures:getSettings',
+  MEMORY_FEATURES_SAVE_SETTINGS: 'memoryFeatures:saveSettings',
 
   // Migration Status (for showing one-time notifications after app rename)
   MIGRATION_GET_STATUS: 'migration:getStatus',
@@ -3700,6 +3852,12 @@ export interface VoiceSettings {
   /** ElevenLabs API key (stored securely) */
   elevenLabsApiKey?: string;
 
+  /**
+   * ElevenLabs Agents API key (stored securely).
+   * Optional: if unset, features that need it may fall back to `elevenLabsApiKey`.
+   */
+  elevenLabsAgentsApiKey?: string;
+
   /** OpenAI API key for voice (if different from main key) */
   openaiApiKey?: string;
 
@@ -3720,6 +3878,12 @@ export interface VoiceSettings {
 
   /** Selected ElevenLabs voice ID */
   elevenLabsVoiceId?: string;
+
+  /** Default ElevenLabs Agent ID for outbound phone calls (optional) */
+  elevenLabsAgentId?: string;
+
+  /** Default ElevenLabs agent phone number ID for outbound calls (optional) */
+  elevenLabsAgentPhoneNumberId?: string;
 
   /** Selected OpenAI voice name */
   openaiVoice?: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
