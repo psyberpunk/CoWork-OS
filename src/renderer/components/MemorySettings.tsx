@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ChatGPTImportWizard } from './ChatGPTImportWizard';
 
 // Types inlined since preload types aren't directly importable in renderer
@@ -22,10 +22,33 @@ interface MemoryStats {
   compressionRatio: number;
 }
 
+interface ImportedStats {
+  count: number;
+  totalTokens: number;
+}
+
+interface MemoryItem {
+  id: string;
+  content: string;
+  tokens: number;
+  createdAt: number;
+}
+
 interface MemorySettingsProps {
   workspaceId: string;
   onSettingsChanged?: () => void;
 }
+
+/** Parse the ChatGPT import tag from memory content */
+function parseImportTag(content: string): { title: string; preview: string } {
+  const match = content.match(/^\[Imported from ChatGPT\s*—\s*"(.+?)"\s*(?:\(conv:[^)]+\))?\]\n?([\s\S]*)/);
+  if (match) {
+    return { title: match[1], preview: match[2].slice(0, 200) };
+  }
+  return { title: 'Imported Memory', preview: content.slice(0, 200) };
+}
+
+const PAGE_SIZE = 20;
 
 export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySettingsProps) {
   const [settings, setSettings] = useState<MemorySettingsData | null>(null);
@@ -34,6 +57,15 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [showImportWizard, setShowImportWizard] = useState(false);
+
+  // Imported memories state
+  const [importedStats, setImportedStats] = useState<ImportedStats | null>(null);
+  const [showImported, setShowImported] = useState(false);
+  const [importedMemories, setImportedMemories] = useState<MemoryItem[]>([]);
+  const [importedOffset, setImportedOffset] = useState(0);
+  const [importedHasMore, setImportedHasMore] = useState(false);
+  const [loadingImported, setLoadingImported] = useState(false);
+  const [deletingImported, setDeletingImported] = useState(false);
 
   useEffect(() => {
     if (workspaceId) {
@@ -44,16 +76,66 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
   const loadData = async () => {
     try {
       setLoading(true);
-      const [loadedSettings, loadedStats] = await Promise.all([
+      const [loadedSettings, loadedStats, loadedImportedStats] = await Promise.all([
         window.electronAPI.getMemorySettings(workspaceId),
         window.electronAPI.getMemoryStats(workspaceId),
+        window.electronAPI.getImportedMemoryStats(workspaceId),
       ]);
       setSettings(loadedSettings);
       setStats(loadedStats);
+      setImportedStats(loadedImportedStats);
     } catch (error) {
       console.error('Failed to load memory settings:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadImportedMemories = useCallback(async (offset = 0) => {
+    try {
+      setLoadingImported(true);
+      const memories = await window.electronAPI.findImportedMemories({
+        workspaceId,
+        limit: PAGE_SIZE,
+        offset,
+      });
+      if (offset === 0) {
+        setImportedMemories(memories);
+      } else {
+        setImportedMemories(prev => [...prev, ...memories]);
+      }
+      setImportedOffset(offset + memories.length);
+      setImportedHasMore(memories.length === PAGE_SIZE);
+    } catch (error) {
+      console.error('Failed to load imported memories:', error);
+    } finally {
+      setLoadingImported(false);
+    }
+  }, [workspaceId]);
+
+  const handleToggleImported = () => {
+    if (!showImported) {
+      loadImportedMemories(0);
+    }
+    setShowImported(!showImported);
+  };
+
+  const handleDeleteImported = async () => {
+    if (!confirm('Are you sure you want to delete all imported ChatGPT memories? Native memories will not be affected. This cannot be undone.')) {
+      return;
+    }
+    try {
+      setDeletingImported(true);
+      await window.electronAPI.deleteImportedMemories(workspaceId);
+      setImportedMemories([]);
+      setImportedOffset(0);
+      setImportedHasMore(false);
+      setShowImported(false);
+      await loadData();
+    } catch (error) {
+      console.error('Failed to delete imported memories:', error);
+    } finally {
+      setDeletingImported(false);
     }
   };
 
@@ -78,6 +160,10 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
     try {
       setClearing(true);
       await window.electronAPI.clearMemory(workspaceId);
+      setImportedMemories([]);
+      setImportedOffset(0);
+      setImportedHasMore(false);
+      setShowImported(false);
       await loadData();
     } catch (error) {
       console.error('Failed to clear memory:', error);
@@ -143,13 +229,145 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
         </div>
       )}
 
+      {/* Imported Memories Section */}
+      {importedStats && importedStats.count > 0 && (
+        <div className="settings-form-group" style={{ marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid var(--color-border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>Imported Memories</div>
+              <span style={{
+                background: 'var(--color-accent, #3b82f6)',
+                color: 'white',
+                fontSize: '11px',
+                fontWeight: '600',
+                padding: '2px 8px',
+                borderRadius: '10px',
+              }}>
+                {importedStats.count.toLocaleString()}
+              </span>
+            </div>
+            <button
+              onClick={handleToggleImported}
+              style={{
+                background: 'none',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-secondary)',
+                padding: '4px 12px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '12px',
+              }}
+            >
+              {showImported ? 'Hide' : 'View'}
+            </button>
+          </div>
+
+          {/* Imported stats mini cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: showImported ? '12px' : 0 }}>
+            <div style={{ padding: '8px 12px', background: 'var(--color-bg-tertiary)', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Conversations</span>
+              <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--color-text-primary)' }}>{importedStats.count.toLocaleString()}</span>
+            </div>
+            <div style={{ padding: '8px 12px', background: 'var(--color-bg-tertiary)', borderRadius: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Tokens</span>
+              <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--color-text-primary)' }}>{importedStats.totalTokens.toLocaleString()}</span>
+            </div>
+          </div>
+
+          {/* Expanded imported memories list */}
+          {showImported && (
+            <div>
+              <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: '6px' }}>
+                {importedMemories.map((memory) => {
+                  const { title, preview } = parseImportTag(memory.content);
+                  return (
+                    <div
+                      key={memory.id}
+                      style={{
+                        padding: '10px 12px',
+                        borderBottom: '1px solid var(--color-border)',
+                        fontSize: '13px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <div style={{ fontWeight: 500, color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>
+                          {title}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--color-text-tertiary)', whiteSpace: 'nowrap' }}>
+                          {new Date(memory.createdAt).toLocaleDateString()} · {memory.tokens} tokens
+                        </div>
+                      </div>
+                      <div style={{ color: 'var(--color-text-secondary)', fontSize: '12px', lineHeight: '1.4', overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const }}>
+                        {preview}
+                      </div>
+                    </div>
+                  );
+                })}
+                {importedMemories.length === 0 && !loadingImported && (
+                  <div style={{ padding: '20px', textAlign: 'center', color: 'var(--color-text-secondary)', fontSize: '13px' }}>
+                    No imported memories found.
+                  </div>
+                )}
+                {loadingImported && (
+                  <div style={{ padding: '12px', textAlign: 'center', color: 'var(--color-text-secondary)', fontSize: '13px' }}>
+                    Loading...
+                  </div>
+                )}
+              </div>
+
+              {importedHasMore && !loadingImported && (
+                <button
+                  onClick={() => loadImportedMemories(importedOffset)}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    marginTop: '8px',
+                    padding: '6px',
+                    background: 'none',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: '6px',
+                    color: 'var(--color-text-secondary)',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  Load more...
+                </button>
+              )}
+
+              <button
+                onClick={handleDeleteImported}
+                disabled={deletingImported}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  marginTop: '8px',
+                  padding: '6px 12px',
+                  background: 'var(--color-error)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: deletingImported ? 'default' : 'pointer',
+                  fontSize: '12px',
+                  opacity: deletingImported ? 0.6 : 1,
+                }}
+              >
+                {deletingImported ? 'Deleting...' : 'Delete All Imported Memories'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Import from ChatGPT */}
       <div className="settings-form-group" style={{ marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid var(--color-border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <div style={{ fontWeight: 500, color: 'var(--color-text-primary)', marginBottom: '4px' }}>Import from ChatGPT</div>
             <p className="settings-form-hint" style={{ margin: 0 }}>
-              Import your ChatGPT conversation history to build richer context. Your data stays on your device.
+              {importedStats && importedStats.count > 0
+                ? 'Import more conversations to append to existing imported memories. Duplicates are automatically skipped.'
+                : 'Import your ChatGPT conversation history to build richer context. Your data stays on your device.'}
             </p>
           </div>
           <button
@@ -158,7 +376,7 @@ export function MemorySettings({ workspaceId, onSettingsChanged }: MemorySetting
             disabled={!settings.enabled}
             style={{ opacity: settings.enabled ? 1 : 0.5, whiteSpace: 'nowrap' }}
           >
-            Import
+            {importedStats && importedStats.count > 0 ? 'Import More' : 'Import'}
           </button>
         </div>
       </div>

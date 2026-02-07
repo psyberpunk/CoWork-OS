@@ -140,8 +140,8 @@ const ws = new WebSocket('ws://127.0.0.1:18789');
 ws.on('open', () => {
   // Send connect request with token
   ws.send(JSON.stringify({
-    type: 'request',
-    id: 1,
+    type: 'req',
+    id: '1',
     method: 'connect',
     params: {
       token: 'your-token-here',
@@ -168,8 +168,8 @@ async def connect():
     async with websockets.connect(uri) as ws:
         # Authenticate
         await ws.send(json.dumps({
-            "type": "request",
-            "id": 1,
+            "type": "req",
+            "id": "1",
             "method": "connect",
             "params": {
                 "token": "your-token-here",
@@ -241,4 +241,4 @@ ssh -N -L 18789:127.0.0.1:18789 \
 
 ## API Reference
 
-See the [Control Plane Protocol](./control-plane-protocol.md) documentation for the full WebSocket API.
+Protocol reference (methods/events/error codes) lives in `src/electron/control-plane/protocol.ts`.

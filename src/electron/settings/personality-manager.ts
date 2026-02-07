@@ -388,7 +388,7 @@ export class PersonalityManager {
     }
 
     // 4. Quirks
-    const quirksPrompt = this.getQuirksPrompt(settings.quirks);
+    const quirksPrompt = this.getQuirksPrompt(settings.quirks, settings.activePersona);
     if (quirksPrompt) {
       parts.push(quirksPrompt);
     }
@@ -469,7 +469,7 @@ export class PersonalityManager {
   /**
    * Generate prompt section for personality quirks
    */
-  private static getQuirksPrompt(quirks?: PersonalityQuirks): string {
+  private static getQuirksPrompt(quirks?: PersonalityQuirks, personaId?: PersonaId): string {
     if (!quirks) return '';
 
     const lines: string[] = [];
@@ -479,7 +479,26 @@ export class PersonalityManager {
     }
 
     if (quirks.signOff) {
-      lines.push(`- End longer responses with your signature sign-off: "${quirks.signOff}"`);
+      const personaStyle: Partial<Record<PersonaId, string>> = {
+        companion: 'gentle and warm',
+        jarvis: 'refined and butler-like',
+        friday: 'brief and professionally supportive',
+        hal: 'calm and reassuring',
+        computer: 'formal and status-oriented',
+        alfred: 'wise and nurturing',
+        intern: 'upbeat and enthusiastic',
+        sensei: 'patient and reflective',
+        pirate: 'playful and nautical',
+        noir: 'noir and hard-boiled',
+      };
+      const style = (personaId && personaStyle[personaId]) ? personaStyle[personaId] : 'brief';
+
+      lines.push(
+        `- Only when it feels like a natural closing (not on most messages), you may end some longer responses with a ${style} sign-off`
+      );
+      lines.push(
+        `- Match the user's language; if needed, translate/adapt this signature sign-off: "${quirks.signOff}"`
+      );
     }
 
     if (quirks.analogyDomain && quirks.analogyDomain !== 'none') {

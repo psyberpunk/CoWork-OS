@@ -510,6 +510,15 @@ export const ChatGPTImportSchema = z.object({
   distillModel: z.string().max(200).optional(),
 });
 
+export const FindImportedSchema = z.object({
+  workspaceId: z.string().refine(
+    (val) => val === TEMP_WORKSPACE_ID || z.string().uuid().safeParse(val).success,
+    { message: 'Must be a valid UUID or temp workspace ID' }
+  ),
+  limit: z.number().int().min(1).max(500).optional(),
+  offset: z.number().int().min(0).optional(),
+});
+
 // ============ File Operation Schemas ============
 
 export const FilePathSchema = z.object({

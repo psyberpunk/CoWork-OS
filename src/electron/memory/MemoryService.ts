@@ -164,7 +164,8 @@ export class MemoryService {
    */
   static search(workspaceId: string, query: string, limit = 20): MemorySearchResult[] {
     this.ensureInitialized();
-    return this.memoryRepo.search(workspaceId, query, limit);
+    // Include private memories — private means not shared externally, not hidden from the owner
+    return this.memoryRepo.search(workspaceId, query, limit, true);
   }
 
   /**
@@ -198,7 +199,7 @@ export class MemoryService {
    */
   static getRecent(workspaceId: string, limit = 20): Memory[] {
     this.ensureInitialized();
-    return this.memoryRepo.getRecentForWorkspace(workspaceId, limit);
+    return this.memoryRepo.getRecentForWorkspace(workspaceId, limit, true);
   }
 
   /**
@@ -214,7 +215,8 @@ export class MemoryService {
     }
 
     // Get recent memories (summaries preferred)
-    const recentMemories = this.memoryRepo.getRecentForWorkspace(workspaceId, 5);
+    // Include private memories — they are private from external sharing, not from local agent context
+    const recentMemories = this.memoryRepo.getRecentForWorkspace(workspaceId, 5, true);
 
     // Search for relevant memories based on task prompt
     let relevantMemories: MemorySearchResult[] = [];
@@ -223,7 +225,7 @@ export class MemoryService {
         // Extract key terms for search
         const searchTerms = this.extractSearchTerms(taskPrompt);
         if (searchTerms) {
-          relevantMemories = this.memoryRepo.search(workspaceId, searchTerms, 5);
+          relevantMemories = this.memoryRepo.search(workspaceId, searchTerms, 5, true);
           // Filter out memories that are already in recent
           const recentIds = new Set(recentMemories.map((m) => m.id));
           relevantMemories = relevantMemories.filter((m) => !recentIds.has(m.id));
@@ -294,6 +296,32 @@ export class MemoryService {
   static getStats(workspaceId: string): MemoryStats {
     this.ensureInitialized();
     return this.memoryRepo.getStats(workspaceId);
+  }
+
+  /**
+   * Get statistics for imported ChatGPT memories
+   */
+  static getImportedStats(workspaceId: string): { count: number; totalTokens: number } {
+    this.ensureInitialized();
+    return this.memoryRepo.getImportedStats(workspaceId);
+  }
+
+  /**
+   * Find imported ChatGPT memories with pagination
+   */
+  static findImported(workspaceId: string, limit = 50, offset = 0): Memory[] {
+    this.ensureInitialized();
+    return this.memoryRepo.findImported(workspaceId, limit, offset);
+  }
+
+  /**
+   * Delete all imported ChatGPT memories for a workspace
+   */
+  static deleteImported(workspaceId: string): number {
+    this.ensureInitialized();
+    const deleted = this.memoryRepo.deleteImported(workspaceId);
+    memoryEvents.emit('memoryChanged', { type: 'importedDeleted', workspaceId });
+    return deleted;
   }
 
   /**

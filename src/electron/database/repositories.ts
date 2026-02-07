@@ -257,7 +257,21 @@ export class TaskRepository {
   /**
    * Find tasks by workspace ID
    */
-  findByWorkspace(workspaceId: string): Task[] {
+  findByWorkspace(workspaceId: string, limit?: number, offset?: number): Task[] {
+    if (typeof limit === 'number' && Number.isFinite(limit)) {
+      const safeLimit = Math.max(1, Math.floor(limit));
+      const safeOffset =
+        typeof offset === 'number' && Number.isFinite(offset) ? Math.max(0, Math.floor(offset)) : 0;
+      const stmt = this.db.prepare(`
+        SELECT * FROM tasks
+        WHERE workspace_id = ?
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+      `);
+      const rows = stmt.all(workspaceId, safeLimit, safeOffset) as any[];
+      return rows.map(row => this.mapRowToTask(row));
+    }
+
     const stmt = this.db.prepare(`
       SELECT * FROM tasks
       WHERE workspace_id = ?
@@ -265,6 +279,15 @@ export class TaskRepository {
     `);
     const rows = stmt.all(workspaceId) as any[];
     return rows.map(row => this.mapRowToTask(row));
+  }
+
+  countByWorkspace(workspaceId: string): number {
+    const stmt = this.db.prepare('SELECT COUNT(1) as count FROM tasks WHERE workspace_id = ?');
+    const row = stmt.get(workspaceId) as any;
+    const count = row?.count;
+    if (typeof count === 'number') return count;
+    const parsed = Number(count);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   /**
@@ -2176,7 +2199,8 @@ export class MemoryRepository {
    * Layer 1: Search returns IDs + brief snippets (~50 tokens each)
    * Uses FTS5 for full-text search with relevance ranking
    */
-  search(workspaceId: string, query: string, limit = 20): MemorySearchResult[] {
+  search(workspaceId: string, query: string, limit = 20, includePrivate = false): MemorySearchResult[] {
+    const privacyFilter = includePrivate ? '' : 'AND m.is_private = 0';
     try {
       // Try FTS5 search first
       const stmt = this.db.prepare(`
@@ -2184,7 +2208,7 @@ export class MemoryRepository {
                bm25(memories_fts) as score
         FROM memories_fts f
         JOIN memories m ON f.rowid = m.rowid
-        WHERE memories_fts MATCH ? AND m.workspace_id = ? AND m.is_private = 0
+        WHERE memories_fts MATCH ? AND m.workspace_id = ? ${privacyFilter}
         ORDER BY score
         LIMIT ?
       `);
@@ -2201,10 +2225,11 @@ export class MemoryRepository {
       }));
     } catch {
       // Fall back to LIKE search if FTS5 is not available
+      const fallbackPrivacyFilter = includePrivate ? '' : 'AND is_private = 0';
       const stmt = this.db.prepare(`
         SELECT id, summary, content, type, created_at, task_id
         FROM memories
-        WHERE workspace_id = ? AND is_private = 0
+        WHERE workspace_id = ? ${fallbackPrivacyFilter}
           AND (content LIKE ? OR summary LIKE ?)
         ORDER BY created_at DESC
         LIMIT ?
@@ -2235,7 +2260,7 @@ export class MemoryRepository {
     const stmt = this.db.prepare(`
       SELECT id, content, type, created_at, task_id
       FROM memories
-      WHERE workspace_id = ? AND is_private = 0
+      WHERE workspace_id = ?
         AND created_at BETWEEN ? AND ?
       ORDER BY created_at ASC
       LIMIT ?
@@ -2269,10 +2294,11 @@ export class MemoryRepository {
   /**
    * Get recent memories for context injection
    */
-  getRecentForWorkspace(workspaceId: string, limit = 10): Memory[] {
+  getRecentForWorkspace(workspaceId: string, limit = 10, includePrivate = false): Memory[] {
+    const privacyFilter = includePrivate ? '' : 'AND is_private = 0';
     const stmt = this.db.prepare(`
       SELECT * FROM memories
-      WHERE workspace_id = ? AND is_private = 0
+      WHERE workspace_id = ? ${privacyFilter}
       ORDER BY created_at DESC
       LIMIT ?
     `);
@@ -2362,6 +2388,47 @@ export class MemoryRepository {
       compressedCount,
       compressionRatio: count > 0 ? compressedCount / count : 0,
     };
+  }
+
+  /**
+   * Get statistics for imported ChatGPT memories
+   */
+  getImportedStats(workspaceId: string): { count: number; totalTokens: number } {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count, COALESCE(SUM(tokens), 0) as total_tokens
+      FROM memories
+      WHERE workspace_id = ? AND content LIKE '[Imported from ChatGPT %'
+    `);
+    const row = stmt.get(workspaceId) as Record<string, unknown>;
+    return {
+      count: row.count as number,
+      totalTokens: row.total_tokens as number,
+    };
+  }
+
+  /**
+   * Find imported ChatGPT memories with pagination
+   */
+  findImported(workspaceId: string, limit = 50, offset = 0): Memory[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM memories
+      WHERE workspace_id = ? AND content LIKE '[Imported from ChatGPT %'
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?
+    `);
+    const rows = stmt.all(workspaceId, limit, offset) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToMemory(row));
+  }
+
+  /**
+   * Delete all imported ChatGPT memories for a workspace
+   */
+  deleteImported(workspaceId: string): number {
+    const stmt = this.db.prepare(
+      `DELETE FROM memories WHERE workspace_id = ? AND content LIKE '[Imported from ChatGPT %'`
+    );
+    const result = stmt.run(workspaceId);
+    return result.changes;
   }
 
   private truncateToSnippet(content: string, maxChars: number): string {

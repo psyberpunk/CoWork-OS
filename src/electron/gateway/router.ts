@@ -17,6 +17,7 @@ import {
   GatewayEventHandler,
   CallbackQuery,
   InlineKeyboardButton,
+  MessageAttachment,
 } from './channels/types';
 import { TelegramAdapter } from './channels/telegram';
 import { SecurityManager } from './security';
@@ -578,6 +579,7 @@ export class MessageRouter {
         chatId: message.chatId,
         direction: 'outgoing',
         content: message.text,
+        attachments: this.toDbAttachments(message.attachments),
         timestamp: Date.now(),
       });
 
@@ -600,6 +602,30 @@ export class MessageRouter {
   }
 
   // Private methods
+
+  private toDbAttachments(
+    attachments?: MessageAttachment[]
+  ): Array<{ type: string; url?: string; fileName?: string }> | undefined {
+    if (!attachments || !Array.isArray(attachments) || attachments.length === 0) {
+      return undefined;
+    }
+
+    const safe = attachments
+      .map((att) => {
+        const type = typeof att?.type === 'string' ? att.type : '';
+        if (!type) return null;
+        const url = typeof att?.url === 'string' ? att.url : undefined;
+        const fileName = typeof att?.fileName === 'string' ? att.fileName : undefined;
+        return {
+          type,
+          ...(url ? { url } : {}),
+          ...(fileName ? { fileName } : {}),
+        };
+      })
+      .filter(Boolean) as Array<{ type: string; url?: string; fileName?: string }>;
+
+    return safe.length > 0 ? safe : undefined;
+  }
 
   /**
    * Transcribe audio attachments in a message
@@ -739,16 +765,23 @@ export class MessageRouter {
       return;
     }
 
-    // Transcribe any audio attachments before processing
-    await this.transcribeAudioAttachments(message);
+    // Security check first (avoid doing extra work like transcription for unauthorized users)
+    const securityResult = await this.securityManager.checkAccess(channel, message, message.isGroup);
 
-    // Log incoming message
+    // Transcribe any audio attachments before processing (authorized only)
+    if (securityResult.allowed) {
+      await this.transcribeAudioAttachments(message);
+    }
+
+    // Log incoming message (include resolved user row + sanitized attachment metadata)
     this.messageRepo.create({
       channelId: channel.id,
       channelMessageId: message.messageId,
       chatId: message.chatId,
+      userId: securityResult.user?.id,
       direction: 'incoming',
       content: message.text,
+      attachments: this.toDbAttachments(message.attachments),
       timestamp: message.timestamp.getTime(),
     });
 
@@ -763,9 +796,6 @@ export class MessageRouter {
         preview: message.text.slice(0, 100),
       },
     });
-
-    // Security check
-    const securityResult = await this.securityManager.checkAccess(channel, message, message.isGroup);
 
     if (!securityResult.allowed) {
       // Handle unauthorized access

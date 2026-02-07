@@ -311,6 +311,21 @@ export class ControlPlaneServer {
     return this.clients.broadcast(event, payload);
   }
 
+  /**
+   * Broadcast an event to all authenticated operator (non-node) clients.
+   * Useful for task/control-plane events that should not go to mobile companion nodes.
+   */
+  broadcastToOperators(event: string, payload?: unknown): number {
+    return this.clients.broadcastToOperators(event, payload);
+  }
+
+  /**
+   * Broadcast an event to all authenticated node clients.
+   */
+  broadcastToNodes(event: string, payload?: unknown): number {
+    return this.clients.broadcastToNodes(event, payload);
+  }
+
   // ===== Private Methods =====
 
   /**
@@ -601,10 +616,14 @@ export class ControlPlaneServer {
       client.send(createResponseFrame(request.id, result));
     } catch (error: any) {
       console.error(`[ControlPlane] Method error (${request.method}):`, error);
+      const code =
+        typeof error?.code === 'string' && (Object.values(ErrorCodes) as string[]).includes(error.code)
+          ? (error.code as any)
+          : ErrorCodes.METHOD_FAILED;
       client.send(createErrorResponse(
         request.id,
-        ErrorCodes.METHOD_FAILED,
-        error.message || 'Method execution failed',
+        code,
+        error?.message || 'Method execution failed',
         error.details
       ));
     }

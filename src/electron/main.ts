@@ -429,7 +429,7 @@ app.whenReady().then(async () => {
     await CanvasManager.getInstance().restoreSessions();
 
     // Initialize control plane (WebSocket gateway)
-    setupControlPlaneHandlers(mainWindow);
+    setupControlPlaneHandlers(mainWindow, { agentDaemon, dbManager });
 
     // Initialize menu bar tray (macOS native companion)
     if (process.platform === 'darwin') {

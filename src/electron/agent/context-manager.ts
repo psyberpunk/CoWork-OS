@@ -8,11 +8,41 @@ import { LLMMessage, LLMContent, LLMToolResult } from './llm';
 // Approximate token limits for different models
 const MODEL_LIMITS: Record<string, number> = {
   'opus-4-5': 200000,
+  'sonnet-4-5': 200000,
+  'haiku-4-5': 200000,
   'sonnet-4': 200000,
   'sonnet-3-5': 200000,
   'haiku-3-5': 200000,
+  // Common OpenAI model ids (conservative; underestimating is safer than overrunning).
+  'gpt-4o': 128000,
+  'gpt-4o-mini': 128000,
+  'gpt-4.1': 128000,
+  'gpt-4.1-mini': 128000,
+  'gpt-4-turbo': 128000,
+  'gpt-3.5-turbo': 16000,
   default: 100000,
 };
+
+function inferModelLimit(modelKey: string): number | null {
+  const key = modelKey.toLowerCase().trim();
+  if (!key) return null;
+
+  // Anthropic raw ids: e.g. "claude-3-5-sonnet-latest"
+  if (key.startsWith('claude-') || key.includes('sonnet') || key.includes('opus') || key.includes('haiku')) {
+    return 200000;
+  }
+
+  // Try to parse "8k", "16k", "32k", "128k" patterns.
+  const match = key.match(/(^|[^0-9])(\d{1,3})k([^0-9]|$)/);
+  if (match) {
+    const k = Number(match[2]);
+    if (Number.isFinite(k) && k > 0) {
+      return k * 1000;
+    }
+  }
+
+  return null;
+}
 
 // Reserve tokens for system prompt and response
 const RESERVED_TOKENS = 8000;
@@ -124,7 +154,7 @@ export class ContextManager {
 
   constructor(modelKey: string = 'default') {
     this.modelKey = modelKey;
-    this.maxTokens = MODEL_LIMITS[modelKey] || MODEL_LIMITS.default;
+    this.maxTokens = MODEL_LIMITS[modelKey] || inferModelLimit(modelKey) || MODEL_LIMITS.default;
   }
 
   /**

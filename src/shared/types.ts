@@ -201,6 +201,9 @@ export const TOOL_GROUPS = {
     'system_info',
     'get_env',
     'get_app_paths',
+    // Local gateway message history
+    'channel_list_chats',
+    'channel_history',
   ],
   // Write operations - medium risk
   'group:write': [
@@ -266,6 +269,9 @@ export const TOOL_GROUPS = {
     'read_clipboard',
     'write_clipboard',
     'task_history',
+    // Privacy-sensitive: exposes prior chat logs across chats
+    'channel_list_chats',
+    'channel_history',
   ],
   // Image generation - requires API access
   'group:image': [
@@ -1816,6 +1822,9 @@ export const IPC_CHANNELS = {
   MEMORY_IMPORT_CHATGPT: 'memory:importChatGPT',
   MEMORY_IMPORT_CHATGPT_PROGRESS: 'memory:importChatGPTProgress',
   MEMORY_IMPORT_CHATGPT_CANCEL: 'memory:importChatGPTCancel',
+  MEMORY_GET_IMPORTED_STATS: 'memory:getImportedStats',
+  MEMORY_FIND_IMPORTED: 'memory:findImported',
+  MEMORY_DELETE_IMPORTED: 'memory:deleteImported',
 
   // Memory Features (Global Toggles)
   MEMORY_FEATURES_GET_SETTINGS: 'memoryFeatures:getSettings',

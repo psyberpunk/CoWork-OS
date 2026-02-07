@@ -474,7 +474,7 @@ export function getChannelMessage(
   ctx: ChannelMessageContext,
   replacements?: Record<string, string>
 ): string {
-  const { personality, emojiUsage, quirks, persona } = ctx;
+  const { personality, emojiUsage, persona } = ctx;
 
   // Get base message for personality
   const messages = CHANNEL_MESSAGES[personality] || CHANNEL_MESSAGES.professional;
@@ -492,11 +492,6 @@ export function getChannelMessage(
 
   // Add emoji if appropriate
   message = addEmoji(message, key, emojiUsage);
-
-  // Add sign-off to completion messages
-  if ((key === 'taskComplete' || key === 'taskCompleteWithResult') && quirks.signOff) {
-    message = `${message}\n\n${quirks.signOff}`;
-  }
 
   return message;
 }

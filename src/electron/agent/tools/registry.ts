@@ -27,6 +27,7 @@ import { GoogleCalendarTools } from './google-calendar-tools';
 import { DropboxTools } from './dropbox-tools';
 import { SharePointTools } from './sharepoint-tools';
 import { VoiceCallTools } from './voice-call-tools';
+import { ChannelTools } from './channel-tools';
 import { readFilesByPatterns } from './read-files';
 import { LLMTool } from '../llm/types';
 import { SearchProviderFactory } from '../search';
@@ -67,6 +68,7 @@ export class ToolRegistry {
   private dropboxTools: DropboxTools;
   private sharePointTools: SharePointTools;
   private voiceCallTools: VoiceCallTools;
+  private channelTools?: ChannelTools;
   private gatewayContext?: GatewayContextType;
   private deniedTools: Set<string> = new Set();
   private deniedGroups: Set<ToolGroupName> = new Set();
@@ -103,6 +105,11 @@ export class ToolRegistry {
     this.dropboxTools = new DropboxTools(workspace, daemon, taskId);
     this.sharePointTools = new SharePointTools(workspace, daemon, taskId);
     this.voiceCallTools = new VoiceCallTools(workspace, daemon, taskId);
+    // Some unit tests stub daemon as a plain object. Make channel history tools optional.
+    const dbGetter = (daemon as any)?.getDatabase;
+    if (typeof dbGetter === 'function') {
+      this.channelTools = new ChannelTools(dbGetter.call(daemon), daemon, taskId);
+    }
     this.gatewayContext = gatewayContext;
     this.applyToolRestrictions(toolRestrictions);
   }
@@ -296,6 +303,11 @@ export class ToolRegistry {
 
     // Always add mention tools (enables multi-agent collaboration)
     allTools.push(...MentionTools.getToolDefinitions());
+
+    // Channel history tools (local gateway message log)
+    if (this.channelTools) {
+      allTools.push(...ChannelTools.getToolDefinitions());
+    }
 
     // Add meta tools for execution control
     allTools.push(...this.getMetaToolDefinitions());
@@ -676,6 +688,7 @@ System Tools:
 - get_env: Read environment variable
 - get_app_paths: Get system paths (home, downloads, etc.)
 - run_applescript: Execute AppleScript on macOS (control apps, automate tasks)
+- search_memories: Search workspace memories and imported conversations for past context
 
 Scheduling:
 - schedule_task: Schedule tasks to run at specific times or intervals
@@ -696,6 +709,11 @@ Live Canvas (Visual Workspace):
 - canvas_snapshot: Take a screenshot of the canvas
 - canvas_list: List all active canvas sessions
 IMPORTANT: When using canvas_push, you MUST provide the 'content' parameter with the full HTML string to display.
+
+${this.channelTools ? `
+Channel Message Log (Local Gateway):
+- channel_list_chats: List recently active chats for a channel (discover chat IDs)
+- channel_history: Fetch recent messages for a specific chat ID (use for summarization/monitoring)` : ''}
 
 	Plan Control:
 	- revise_plan: Modify remaining plan steps when obstacles are encountered or new information discovered
@@ -809,6 +827,7 @@ ${skillDescriptions}`;
 
     // System tools
     if (name === 'system_info') return await this.systemTools.getSystemInfo();
+    if (name === 'search_memories') return await this.systemTools.searchMemories(input);
     if (name === 'read_clipboard') return await this.systemTools.readClipboard();
     if (name === 'write_clipboard') return await this.systemTools.writeClipboard(input.text);
     if (name === 'take_screenshot') return await this.systemTools.takeScreenshot(input);
@@ -838,6 +857,15 @@ ${skillDescriptions}`;
     if (name === 'canvas_eval') return await this.canvasTools.evalScript(input.session_id, input.script);
     if (name === 'canvas_snapshot') return await this.canvasTools.takeSnapshot(input.session_id);
     if (name === 'canvas_list') return this.canvasTools.listSessions();
+
+    // Channel history tools
+    if (name === 'channel_list_chats' || name === 'channel_history') {
+      if (!this.channelTools) {
+        throw new Error('Channel history tools unavailable (database not accessible)');
+      }
+      if (name === 'channel_list_chats') return await this.channelTools.listChats(input);
+      return await this.channelTools.channelHistory(input);
+    }
 
     // Mention tools (multi-agent collaboration)
     if (name === 'list_agent_roles') return await this.mentionTools.listAgentRoles();

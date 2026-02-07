@@ -694,11 +694,6 @@ export function getMessage(
     message = `${message} ${quirks.catchphrase}`;
   }
 
-  // Add sign-off to completion
-  if (key === 'taskComplete' && quirks.signOff) {
-    message = `${message} ${quirks.signOff}`;
-  }
-
   return message;
 }
 

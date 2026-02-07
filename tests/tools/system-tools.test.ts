@@ -379,11 +379,12 @@ describe('SystemTools - getToolDefinitions', () => {
     expect(toolNames).toContain('get_env');
     expect(toolNames).toContain('get_app_paths');
     expect(toolNames).toContain('run_applescript');
+    expect(toolNames).toContain('search_memories');
   });
 
-  it('should have 11 system tools total', () => {
+  it('should have 12 system tools total', () => {
     const tools = SystemTools.getToolDefinitions();
-    expect(tools).toHaveLength(11);
+    expect(tools).toHaveLength(12);
   });
 });
 

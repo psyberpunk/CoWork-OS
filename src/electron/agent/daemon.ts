@@ -3,6 +3,7 @@ import { BrowserWindow } from 'electron';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { DatabaseManager } from '../database/schema';
+import type Database from 'better-sqlite3';
 import {
   TaskRepository,
   TaskEventRepository,
@@ -15,7 +16,8 @@ import { ActivityRepository } from '../activity/ActivityRepository';
 import { AgentRoleRepository } from '../agents/AgentRoleRepository';
 import { MentionRepository } from '../agents/MentionRepository';
 import { buildAgentDispatchPrompt } from '../agents/agent-dispatch';
-import { Task, TaskStatus, TaskEvent, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType, ActivityActorType, ActivityType, CreateActivityRequest, Plan, BoardColumn, Activity, AgentMention } from '../../shared/types';
+import { extractMentionedRoles } from '../agents/mentions';
+import { Task, TaskStatus, TaskEvent, IPC_CHANNELS, QueueSettings, QueueStatus, Workspace, WorkspacePermissions, AgentConfig, AgentType, ActivityActorType, ActivityType, CreateActivityRequest, Plan, BoardColumn, Activity, AgentMention, AgentRole } from '../../shared/types';
 import { TaskExecutor } from './executor';
 import { TaskQueueManager } from './queue-manager';
 import { approvalIdempotency, taskIdempotency, IdempotencyManager } from '../security/concurrency';
@@ -84,20 +86,49 @@ export class AgentDaemon extends EventEmitter {
     this.cleanupIntervalHandle = setInterval(() => this.cleanupOldExecutors(), 5 * 60 * 1000); // Run every 5 minutes
   }
 
+  getDatabase(): Database.Database {
+    return this.dbManager.getDatabase();
+  }
+
   /**
-   * Merge agent role tool restrictions into the task's agentConfig.
+   * Apply agent role configuration to the task before execution.
    *
-   * Note: Tasks support an additive deny-list via AgentConfig.toolRestrictions. Agent roles store
-   * restrictions as { deniedTools, allowedTools }. For now we enforce deniedTools (deny-wins),
-   * merging them into the task's existing toolRestrictions (if any).
+   * Agent roles act like worker profiles. We apply role defaults only when the
+   * task does not specify its own overrides.
+   *
+   * - Merge denied tools into AgentConfig.toolRestrictions (deny-wins)
+   * - Apply provider/model/personality defaults
    */
-  private applyAgentRoleToolRestrictions(task: Task): Task {
+  private applyAgentRoleOverrides(task: Task): { task: Task; changed: boolean } {
     const roleId = task.assignedAgentRoleId;
-    if (!roleId) return task;
+    if (!roleId) return { task, changed: false };
 
     const role = this.agentRoleRepo.findById(roleId);
-    const denied = role?.toolRestrictions?.deniedTools;
-    if (!Array.isArray(denied) || denied.length === 0) return task;
+    if (!role) return { task, changed: false };
+
+    const nextAgentConfig: AgentConfig = task.agentConfig ? { ...task.agentConfig } : {};
+    let changed = false;
+
+    // Apply provider/model/personality defaults only when the task didn't override them.
+    if (!nextAgentConfig.providerType && typeof role.providerType === 'string' && role.providerType.trim().length > 0) {
+      nextAgentConfig.providerType = role.providerType.trim() as any;
+      changed = true;
+    }
+
+    if (!nextAgentConfig.modelKey && typeof role.modelKey === 'string' && role.modelKey.trim().length > 0) {
+      nextAgentConfig.modelKey = role.modelKey.trim();
+      changed = true;
+    }
+
+    if (!nextAgentConfig.personalityId && typeof role.personalityId === 'string' && role.personalityId.trim().length > 0) {
+      nextAgentConfig.personalityId = role.personalityId.trim() as any;
+      changed = true;
+    }
+
+    const denied = role.toolRestrictions?.deniedTools;
+    if (!Array.isArray(denied) || denied.length === 0) {
+      return { task: changed ? { ...task, agentConfig: nextAgentConfig } : task, changed };
+    }
 
     const merged = new Set<string>();
 
@@ -110,14 +141,35 @@ export class AgentDaemon extends EventEmitter {
       }
     };
 
-    addAll(task.agentConfig?.toolRestrictions);
+    addAll(nextAgentConfig.toolRestrictions);
     addAll(denied);
 
-    if (merged.size === 0) return task;
+    if (merged.size > 0) {
+      nextAgentConfig.toolRestrictions = Array.from(merged);
+      changed = true;
+    }
 
-    const nextAgentConfig: AgentConfig = task.agentConfig ? { ...task.agentConfig } : {};
-    nextAgentConfig.toolRestrictions = Array.from(merged);
-    return { ...task, agentConfig: nextAgentConfig };
+    return { task: changed ? { ...task, agentConfig: nextAgentConfig } : task, changed };
+  }
+
+  private maybeCaptureMentionedAgentRoleIds(task: Task): void {
+    if (task.parentTaskId) return;
+    if ((task.agentType ?? 'main') !== 'main') return;
+    if (Array.isArray(task.mentionedAgentRoleIds) && task.mentionedAgentRoleIds.filter(Boolean).length > 0) return;
+
+    try {
+      const activeRoles = this.agentRoleRepo.findAll(false).filter((role) => role.isActive);
+      if (activeRoles.length === 0) return;
+
+      const mentioned = extractMentionedRoles(`${task.title}\n${task.prompt}`, activeRoles);
+      const ids = mentioned.map((role) => role.id).filter(Boolean);
+      if (ids.length === 0) return;
+
+      this.taskRepo.update(task.id, { mentionedAgentRoleIds: ids });
+      task.mentionedAgentRoleIds = ids;
+    } catch (error) {
+      console.warn('[AgentDaemon] Failed to capture mentioned agent roles:', error);
+    }
   }
 
   /**
@@ -221,7 +273,17 @@ export class AgentDaemon extends EventEmitter {
    */
   async startTaskImmediate(task: Task): Promise<void> {
     console.log(`[AgentDaemon] Starting task ${task.id}: ${task.title}`);
-    const effectiveTask = this.applyAgentRoleToolRestrictions(task);
+    const { task: effectiveTask, changed: roleOverridesChanged } = this.applyAgentRoleOverrides(task);
+    if (roleOverridesChanged) {
+      try {
+        this.taskRepo.update(effectiveTask.id, { agentConfig: effectiveTask.agentConfig });
+      } catch (error) {
+        console.warn('[AgentDaemon] Failed to persist agent role overrides:', error);
+      }
+    }
+
+    // Ensure @mentions are recorded for deferred dispatch regardless of task creation entrypoint.
+    this.maybeCaptureMentionedAgentRoleIds(effectiveTask);
 
     const wasQueued = effectiveTask.status === 'queued';
     if (wasQueued) {
@@ -338,6 +400,9 @@ export class AgentDaemon extends EventEmitter {
     agentType: AgentType;
     agentConfig?: AgentConfig;
     depth?: number;
+    assignedAgentRoleId?: string;
+    boardColumn?: BoardColumn;
+    priority?: number;
     budgetTokens?: number;
     budgetCost?: number;
   }): Promise<Task> {
@@ -399,6 +464,22 @@ export class AgentDaemon extends EventEmitter {
       budgetTokens: params.budgetTokens,
       budgetCost: params.budgetCost,
     });
+
+    // Apply agent squad metadata before starting so role context is available immediately.
+    const initialUpdates: Partial<Task> = {};
+    if (typeof params.assignedAgentRoleId === 'string' && params.assignedAgentRoleId.trim().length > 0) {
+      initialUpdates.assignedAgentRoleId = params.assignedAgentRoleId.trim();
+    }
+    if (typeof params.boardColumn === 'string' && params.boardColumn.trim().length > 0) {
+      initialUpdates.boardColumn = params.boardColumn as BoardColumn;
+    }
+    if (typeof params.priority === 'number' && Number.isFinite(params.priority)) {
+      initialUpdates.priority = params.priority;
+    }
+    if (Object.keys(initialUpdates).length > 0) {
+      this.taskRepo.update(task.id, initialUpdates);
+      Object.assign(task, initialUpdates);
+    }
 
     // Start the task (will be queued if necessary)
     await this.startTask(task);
@@ -476,13 +557,13 @@ export class AgentDaemon extends EventEmitter {
     const rolesToDispatch = mentionedRoles.filter(role => !assignedRoleIds.has(role.id));
     if (rolesToDispatch.length === 0) return;
 
-    const planSummary = this.buildPlanSummary(plan);
+      const planSummary = this.buildPlanSummary(plan);
 
     for (const role of rolesToDispatch) {
       const childPrompt = buildAgentDispatchPrompt(
         role,
         { title: task.title, prompt: task.prompt },
-        planSummary ? { planSummary } : undefined
+        { ...(planSummary ? { planSummary } : {}), includeRoleDetails: false }
       );
       const childTask = await this.createChildTask({
         title: `@${role.displayName}: ${task.title}`,
@@ -490,7 +571,10 @@ export class AgentDaemon extends EventEmitter {
         workspaceId: task.workspaceId,
         parentTaskId: task.id,
         agentType: 'sub',
+        assignedAgentRoleId: role.id,
+        boardColumn: 'todo' as BoardColumn,
         agentConfig: {
+          ...(role.providerType ? { providerType: role.providerType } : {}),
           ...(role.modelKey ? { modelKey: role.modelKey } : {}),
           ...(role.personalityId ? { personalityId: role.personalityId } : {}),
           ...(Array.isArray(role.toolRestrictions?.deniedTools) && role.toolRestrictions!.deniedTools.length > 0
@@ -498,11 +582,6 @@ export class AgentDaemon extends EventEmitter {
             : {}),
           retainMemory: false,
         },
-      });
-
-      this.taskRepo.update(childTask.id, {
-        assignedAgentRoleId: role.id,
-        boardColumn: 'todo' as BoardColumn,
       });
 
       const dispatchActivity = this.activityRepo.create({
@@ -543,6 +622,15 @@ export class AgentDaemon extends EventEmitter {
    * Cancel a running or queued task
    */
   async cancelTask(taskId: string): Promise<void> {
+    const existing = this.taskRepo.findById(taskId);
+    if (!existing) {
+      throw new Error(`Task ${taskId} not found`);
+    }
+    // Don't clobber terminal states.
+    if (existing.status === 'completed' || existing.status === 'failed' || existing.status === 'cancelled') {
+      return;
+    }
+
     // Check if task is queued (not yet started)
     if (this.queueManager.cancelQueuedTask(taskId)) {
       this.taskRepo.update(taskId, { status: 'cancelled', completedAt: Date.now() });
@@ -559,6 +647,9 @@ export class AgentDaemon extends EventEmitter {
       await cached.executor.cancel();
       this.activeTasks.delete(taskId);
     }
+
+    // Persist cancellation for running tasks too (important for remote clients querying task status).
+    this.taskRepo.update(taskId, { status: 'cancelled', completedAt: Date.now() });
 
     // Always notify queue manager to remove from running set
     // (handles orphaned tasks that are in runningTaskIds but have no executor)
@@ -1148,6 +1239,13 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
+   * Get agent role by ID
+   */
+  getAgentRoleById(agentRoleId: string): AgentRole | undefined {
+    return this.agentRoleRepo.findById(agentRoleId);
+  }
+
+  /**
    * Get task by ID
    */
   getTask(taskId: string): Task | undefined {
@@ -1418,7 +1516,7 @@ export class AgentDaemon extends EventEmitter {
     if (!task) {
       throw new Error(`Task ${taskId} not found`);
     }
-    const effectiveTask = this.applyAgentRoleToolRestrictions(task);
+    const { task: effectiveTask } = this.applyAgentRoleOverrides(task);
 
     const workspace = this.workspaceRepo.findById(effectiveTask.workspaceId);
     if (!workspace) {

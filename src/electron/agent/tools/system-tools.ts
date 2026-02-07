@@ -7,6 +7,7 @@ import { clipboard, desktopCapturer, nativeImage, shell, app } from 'electron';
 import { Workspace } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { LLMTool } from '../llm/types';
+import { MemoryService } from '../../memory/MemoryService';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -512,6 +513,46 @@ export class SystemTools {
   }
 
   /**
+   * Search workspace memories (including imported ChatGPT conversations)
+   */
+  async searchMemories(input: { query: string; limit?: number }): Promise<{
+    results: Array<{ id: string; snippet: string; type: string; date: string }>;
+    totalFound: number;
+  }> {
+    this.daemon.logEvent(this.taskId, 'tool_call', {
+      tool: 'search_memories',
+      query: input.query,
+    });
+
+    try {
+      const limit = Math.min(input.limit || 20, 50);
+      const results = MemoryService.search(this.workspace.id, input.query, limit);
+
+      const mapped = results.map(r => ({
+        id: r.id,
+        snippet: r.snippet,
+        type: r.type,
+        date: new Date(r.createdAt).toISOString(),
+      }));
+
+      this.daemon.logEvent(this.taskId, 'tool_result', {
+        tool: 'search_memories',
+        success: true,
+        resultCount: mapped.length,
+      });
+
+      return { results: mapped, totalFound: mapped.length };
+    } catch (error) {
+      this.daemon.logEvent(this.taskId, 'tool_result', {
+        tool: 'search_memories',
+        success: false,
+        error: String(error),
+      });
+      return { results: [], totalFound: 0 };
+    }
+  }
+
+  /**
    * Static method to get tool definitions
    */
   static getToolDefinitions(): LLMTool[] {
@@ -659,6 +700,28 @@ export class SystemTools {
             },
           },
           required: ['script'],
+        },
+      },
+      {
+        name: 'search_memories',
+        description:
+          'Search the workspace memory database for past observations, decisions, and insights ' +
+          'from previous sessions and imported conversations (e.g. ChatGPT history). ' +
+          'Use this tool when the user asks about something discussed previously, ' +
+          'or when you need to recall past context. Returns matching memory snippets.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Search query — keywords, names, topics, or phrases to find in memories',
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum number of results to return (default: 20, max: 50)',
+            },
+          },
+          required: ['query'],
         },
       },
     ];

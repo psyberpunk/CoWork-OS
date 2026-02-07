@@ -303,6 +303,9 @@ const IPC_CHANNELS = {
   MEMORY_IMPORT_CHATGPT: 'memory:importChatGPT',
   MEMORY_IMPORT_CHATGPT_PROGRESS: 'memory:importChatGPTProgress',
   MEMORY_IMPORT_CHATGPT_CANCEL: 'memory:importChatGPTCancel',
+  MEMORY_GET_IMPORTED_STATS: 'memory:getImportedStats',
+  MEMORY_FIND_IMPORTED: 'memory:findImported',
+  MEMORY_DELETE_IMPORTED: 'memory:deleteImported',
 
   // Memory Features (global toggles)
   MEMORY_FEATURES_GET_SETTINGS: 'memoryFeatures:getSettings',
@@ -2025,6 +2028,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener(IPC_CHANNELS.MEMORY_EVENT, subscription);
   },
 
+  // Imported Memory APIs
+  getImportedMemoryStats: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_GET_IMPORTED_STATS, workspaceId),
+  findImportedMemories: (data: { workspaceId: string; limit?: number; offset?: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_FIND_IMPORTED, data),
+  deleteImportedMemories: (workspaceId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.MEMORY_DELETE_IMPORTED, workspaceId),
+
   // Memory Features APIs
   getMemoryFeaturesSettings: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_FEATURES_GET_SETTINGS),
   saveMemoryFeaturesSettings: (settings: MemoryFeaturesSettings) =>
@@ -2951,6 +2962,11 @@ export interface ElectronAPI {
   getMemoryStats: (workspaceId: string) => Promise<MemoryStats>;
   clearMemory: (workspaceId: string) => Promise<{ success: boolean }>;
   onMemoryEvent: (callback: (event: { type: string; workspaceId: string }) => void) => () => void;
+
+  // Imported Memories
+  getImportedMemoryStats: (workspaceId: string) => Promise<{ count: number; totalTokens: number }>;
+  findImportedMemories: (data: { workspaceId: string; limit?: number; offset?: number }) => Promise<Memory[]>;
+  deleteImportedMemories: (workspaceId: string) => Promise<{ success: boolean; deleted: number }>;
 
   // Memory Features (global toggles)
   getMemoryFeaturesSettings: () => Promise<MemoryFeaturesSettings>;

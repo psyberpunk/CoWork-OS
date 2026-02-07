@@ -13,6 +13,11 @@ export type DispatchParentTask = {
 
 export type DispatchPromptOptions = {
   planSummary?: string;
+  /**
+   * When false, omit role description/systemPrompt/soul from the dispatch prompt.
+   * This is useful when the runtime already injects role context via system prompt.
+   */
+  includeRoleDetails?: boolean;
 };
 
 const buildSoulSummary = (soul?: string): string | null => {
@@ -40,32 +45,37 @@ export const buildAgentDispatchPrompt = (
   parentTask: DispatchParentTask,
   options?: DispatchPromptOptions
 ): string => {
-  const lines: string[] = [
-    `You are ${role.displayName}${role.description ? ` — ${role.description}` : ''}.`,
-  ];
+  const includeRoleDetails = options?.includeRoleDetails ?? true;
+  const lines: string[] = [];
 
-  if (role.capabilities && role.capabilities.length > 0) {
+  if (includeRoleDetails) {
+    lines.push(`You are ${role.displayName}${role.description ? ` — ${role.description}` : ''}.`);
+  }
+
+  if (includeRoleDetails && role.capabilities && role.capabilities.length > 0) {
     lines.push(`Capabilities: ${role.capabilities.join(', ')}`);
   }
 
-  if (role.systemPrompt) {
+  if (includeRoleDetails && role.systemPrompt) {
     lines.push('System guidance:');
     lines.push(role.systemPrompt);
   }
 
-  const soulSummary = buildSoulSummary(role.soul || undefined);
-  if (soulSummary) {
-    lines.push('Role notes:');
-    lines.push(soulSummary);
+  if (includeRoleDetails) {
+    const soulSummary = buildSoulSummary(role.soul || undefined);
+    if (soulSummary) {
+      lines.push('Role notes:');
+      lines.push(soulSummary);
+    }
   }
 
   if (options?.planSummary) {
-    lines.push('');
+    if (lines.length > 0) lines.push('');
     lines.push('Main agent plan summary (context only):');
     lines.push(options.planSummary);
   }
 
-  lines.push('');
+  if (lines.length > 0) lines.push('');
   lines.push(`Parent task: ${parentTask.title}`);
   lines.push('Request:');
   lines.push(parentTask.prompt);
