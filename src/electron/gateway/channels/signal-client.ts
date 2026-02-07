@@ -4,8 +4,7 @@
  * Wrapper around signal-cli for sending and receiving Signal messages.
  * Supports multiple modes:
  * - Native: Direct CLI invocation (simplest, slower)
- * - JSON-RPC: Socket-based communication (faster, requires daemon)
- * - D-Bus: Linux D-Bus integration (Linux only)
+ * - Daemon: Socket-based communication (faster, requires daemon)
  *
  * Requirements:
  * - signal-cli installed (https://github.com/AsamK/signal-cli)

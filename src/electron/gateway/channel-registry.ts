@@ -484,13 +484,18 @@ export class ChannelRegistry extends EventEmitter {
             },
             mode: {
               type: 'string',
-              description: 'Communication mode (native, json-rpc, dbus)',
+              description: 'Communication mode (native, daemon)',
               default: 'native',
+            },
+            socketPath: {
+              type: 'string',
+              description: 'Daemon socket path (for daemon mode)',
+              default: '/tmp/signal-cli.socket',
             },
             trustMode: {
               type: 'string',
-              description: 'Trust mode for new contacts (always, on-first-use, never)',
-              default: 'on-first-use',
+              description: 'Trust mode for new contacts (tofu, always, manual)',
+              default: 'tofu',
             },
             dmPolicy: {
               type: 'string',
@@ -515,6 +520,25 @@ export class ChannelRegistry extends EventEmitter {
               type: 'boolean',
               description: 'Send typing indicators',
               default: true,
+            },
+            maxAttachmentMb: {
+              type: 'number',
+              description: 'Max attachment size in MB',
+              default: 100,
+            },
+            pollInterval: {
+              type: 'number',
+              description: 'Polling interval for receiving messages in ms',
+              default: 1000,
+            },
+            deduplicationEnabled: {
+              type: 'boolean',
+              description: 'Enable message deduplication',
+              default: true,
+            },
+            responsePrefix: {
+              type: 'string',
+              description: 'Prefix for bot responses',
             },
           },
           required: ['phoneNumber'],

@@ -273,6 +273,22 @@ describe('isPluginCompatible', () => {
     expect(isPluginCompatible(manifest, '0.4.0')).toBe(true);
     expect(isPluginCompatible(manifest, '1.0.0')).toBe(true);
   });
+
+  it('should enforce minimum version within major 0', () => {
+    const manifest: PluginManifest = {
+      name: 'test-plugin',
+      displayName: 'Test Plugin',
+      version: '1.0.0',
+      description: 'A test plugin',
+      type: 'channel',
+      main: 'dist/index.js',
+      coworkVersion: '0.4.0',
+    };
+
+    expect(isPluginCompatible(manifest, '0.3.28')).toBe(false);
+    expect(isPluginCompatible(manifest, '0.4.0')).toBe(true);
+    expect(isPluginCompatible(manifest, '0.5.0')).toBe(true);
+  });
 });
 
 describe('generateManifestTemplate', () => {

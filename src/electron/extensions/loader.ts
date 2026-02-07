@@ -278,11 +278,33 @@ export function isPluginCompatible(manifest: PluginManifest, coworkVersion: stri
     return true; // No version constraint
   }
 
-  // Simple semver comparison (major version must match)
-  const [requiredMajor] = manifest.coworkVersion.split('.').map(Number);
-  const [currentMajor] = coworkVersion.split('.').map(Number);
+  // Minimum version check: current must be >= required.
+  // We intentionally ignore pre-release/build metadata and compare just X.Y.Z.
+  const parse = (version: string): [number, number, number] | null => {
+    const match = version.trim().match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+    if (!match) {
+      return null;
+    }
+    return [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)];
+  };
 
-  return currentMajor >= requiredMajor;
+  const required = parse(manifest.coworkVersion);
+  if (!required) {
+    return false;
+  }
+
+  const current = parse(coworkVersion);
+  if (!current) {
+    // If we cannot parse our own version, be permissive rather than breaking plugin loads.
+    return true;
+  }
+
+  for (let i = 0; i < 3; i++) {
+    if (current[i] > required[i]) return true;
+    if (current[i] < required[i]) return false;
+  }
+
+  return true;
 }
 
 /**
