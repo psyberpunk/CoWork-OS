@@ -21,6 +21,40 @@ interface ChatGPTImportResult {
 
 type WizardStep = 'tutorial' | 'select' | 'options' | 'importing' | 'done';
 
+// Cached model from LLM settings (same shape as CachedModelInfo)
+interface CachedModel {
+  key: string;         // The actual model ID for the provider
+  displayName: string;
+  description: string;
+}
+
+// Map providerType → settings field that holds cached models
+const CACHED_MODELS_KEY: Record<string, string> = {
+  bedrock: 'cachedBedrockModels',
+  gemini: 'cachedGeminiModels',
+  openrouter: 'cachedOpenRouterModels',
+  ollama: 'cachedOllamaModels',
+  openai: 'cachedOpenAIModels',
+  groq: 'cachedGroqModels',
+  xai: 'cachedXaiModels',
+  kimi: 'cachedKimiModels',
+  pi: 'cachedPiModels',
+};
+
+const PROVIDER_LABELS: Record<string, string> = {
+  anthropic: 'Anthropic',
+  bedrock: 'AWS Bedrock',
+  openai: 'OpenAI',
+  gemini: 'Google Gemini',
+  groq: 'Groq',
+  openrouter: 'OpenRouter',
+  xai: 'xAI',
+  ollama: 'Ollama',
+  azure: 'Azure OpenAI',
+  kimi: 'Kimi',
+  pi: 'Pi',
+};
+
 interface ChatGPTImportWizardProps {
   workspaceId: string;
   onClose: () => void;
@@ -34,12 +68,41 @@ export function ChatGPTImportWizard({ workspaceId, onClose, onImportComplete }: 
   const [fileSize, setFileSize] = useState<number>(0);
   const [forcePrivate, setForcePrivate] = useState(true);
   const [maxConversations, setMaxConversations] = useState(0);
-  const [modelOverride, setModelOverride] = useState('');
+  const [distillPreset, setDistillPreset] = useState('default');
+  const [customModel, setCustomModel] = useState('');
+  const [currentProvider, setCurrentProvider] = useState<string>('');
+  const [currentModelName, setCurrentModelName] = useState<string>('');
+  const [availableModels, setAvailableModels] = useState<CachedModel[]>([]);
   const [progress, setProgress] = useState<ChatGPTImportProgress | null>(null);
   const [result, setResult] = useState<ChatGPTImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const unsubscribeRef = useRef<(() => void) | null>(null);
+
+  // Load available models for the current provider on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const settings = await window.electronAPI.getLLMSettings();
+        const providerType = settings?.providerType || '';
+        setCurrentProvider(providerType);
+
+        // Get human-readable current model name from DB models
+        const dbModels = await window.electronAPI.getLLMModels();
+        const current = dbModels?.find((m: { key: string }) => m.key === settings?.modelKey);
+        if (current) setCurrentModelName(current.displayName);
+
+        // Get cached models for the current provider (fetched via "Refresh Models" in settings)
+        const cacheKey = CACHED_MODELS_KEY[providerType];
+        const cached: CachedModel[] | undefined = cacheKey ? settings?.[cacheKey] : undefined;
+        if (cached && cached.length > 0) {
+          setAvailableModels(cached);
+        }
+      } catch {
+        // Non-critical — defaults will work fine
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -81,13 +144,22 @@ export function ChatGPTImportWizard({ workspaceId, onClose, onImportComplete }: 
     });
 
     try {
+      // Resolve distillation model from preset or custom field
+      const distillOpts: { distillProvider?: string; distillModel?: string } = {};
+      if (distillPreset === 'custom') {
+        if (customModel.trim()) distillOpts.distillModel = customModel.trim();
+      } else if (distillPreset !== 'default') {
+        // Preset value = the actual model ID from the provider's cached model list
+        distillOpts.distillModel = distillPreset;
+      }
+
       const importResult = await window.electronAPI.importChatGPT({
         workspaceId,
         filePath,
         maxConversations,
         minMessages: 2,
         forcePrivate,
-        ...(modelOverride.trim() ? { modelOverride: modelOverride.trim() } : {}),
+        ...distillOpts,
       });
 
       setResult(importResult);
@@ -286,29 +358,68 @@ export function ChatGPTImportWizard({ workspaceId, onClose, onImportComplete }: 
           </div>
 
           <div className="settings-form-group">
-            <label className="settings-label">Distillation model (optional)</label>
-            <input
-              type="text"
-              value={modelOverride}
-              onChange={(e) => setModelOverride(e.target.value)}
-              placeholder="Leave empty to use your default model"
-              className="settings-input"
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                borderRadius: '6px',
-                border: '1px solid var(--color-border)',
-                background: 'var(--color-bg-secondary)',
-                color: 'var(--color-text-primary)',
-                fontSize: '13px',
-              }}
-            />
+            <label className="settings-label">Distillation model</label>
+            <select
+              value={distillPreset}
+              onChange={(e) => setDistillPreset(e.target.value)}
+              className="settings-select"
+            >
+              <option value="default">
+                Use current model{currentModelName ? ` (${currentModelName})` : ''}
+              </option>
+              {/* Show models for the user's configured provider */}
+              {currentProvider && PROVIDER_MODELS[currentProvider]?.models.length > 0 && (
+                <optgroup label={`${PROVIDER_MODELS[currentProvider].label} models`}>
+                  {PROVIDER_MODELS[currentProvider].models.map((m) => (
+                    <option key={m.model} value={`${currentProvider}:${m.model}`}>
+                      {m.label} — {m.description}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              <option value="custom">Custom provider & model...</option>
+            </select>
             <p className="settings-form-hint">
-              Each conversation requires an LLM call to extract memories. For large imports, use a cheaper/faster model
-              (e.g. <code style={{ background: 'var(--color-bg-tertiary)', padding: '1px 4px', borderRadius: '3px' }}>claude-haiku-4-5-20250315</code>,{' '}
-              <code style={{ background: 'var(--color-bg-tertiary)', padding: '1px 4px', borderRadius: '3px' }}>gpt-4o-mini</code>) to reduce cost.
+              Each conversation requires an LLM call. For large imports, pick a cheaper/faster model to reduce cost.
             </p>
           </div>
+
+          {distillPreset === 'custom' && (
+            <div className="settings-form-group" style={{ display: 'flex', gap: '12px' }}>
+              <div style={{ flex: 1 }}>
+                <label className="settings-label">Provider</label>
+                <select
+                  value={customProvider}
+                  onChange={(e) => setCustomProvider(e.target.value)}
+                  className="settings-select"
+                >
+                  <option value="">Same as current{currentProvider ? ` (${PROVIDER_MODELS[currentProvider]?.label || currentProvider})` : ''}</option>
+                  {Object.entries(PROVIDER_MODELS).map(([key, { label }]) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ flex: 2 }}>
+                <label className="settings-label">Model ID</label>
+                <input
+                  type="text"
+                  value={customModel}
+                  onChange={(e) => setCustomModel(e.target.value)}
+                  placeholder="e.g. claude-3-5-haiku-20241022"
+                  className="settings-input"
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg-secondary)',
+                    color: 'var(--color-text-primary)',
+                    fontSize: '13px',
+                  }}
+                />
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="chatgpt-import-error">

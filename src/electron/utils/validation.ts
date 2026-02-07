@@ -506,7 +506,8 @@ export const ChatGPTImportSchema = z.object({
   maxConversations: z.number().int().min(0).max(10000).optional(),
   minMessages: z.number().int().min(1).max(100).optional(),
   forcePrivate: z.boolean().optional(),
-  modelOverride: z.string().max(200).optional(),
+  distillProvider: z.string().max(100).optional(),
+  distillModel: z.string().max(200).optional(),
 });
 
 // ============ File Operation Schemas ============

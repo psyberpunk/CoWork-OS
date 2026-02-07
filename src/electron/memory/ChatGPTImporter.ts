@@ -19,6 +19,7 @@ import * as fs from 'fs/promises';
 import * as crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { LLMProviderFactory } from '../agent/llm';
+import type { LLMProviderType } from '../../shared/types';
 import { InputSanitizer } from '../agent/security';
 import { estimateTokens } from '../agent/context-manager';
 import {
@@ -81,8 +82,10 @@ export interface ChatGPTImportOptions {
   minMessages?: number;
   /** Mark all imported memories as private regardless of content. */
   forcePrivate?: boolean;
-  /** Override the model used for distillation (e.g. a cheaper/faster model). */
-  modelOverride?: string;
+  /** Override the LLM provider type for distillation (uses existing credentials). */
+  distillProvider?: string;
+  /** Override the model ID for distillation (e.g. a cheaper/faster model). */
+  distillModel?: string;
   /** Abort signal to cancel an in-progress import. */
   signal?: AbortSignal;
 }
@@ -160,7 +163,8 @@ export class ChatGPTImporter {
       maxConversations = 0,
       minMessages = 2,
       forcePrivate = false,
-      modelOverride,
+      distillProvider,
+      distillModel,
       signal,
     } = options;
 
@@ -297,7 +301,7 @@ export class ChatGPTImporter {
           const transcript = this.buildTranscript(title, messages);
 
           // Distil via LLM
-          const distilled = await this.distilConversation(transcript, title, modelOverride);
+          const distilled = await this.distilConversation(transcript, title, distillProvider, distillModel);
 
           // ── 4. Store memories directly via repository ──────
           this.emitProgress({
@@ -452,27 +456,42 @@ export class ChatGPTImporter {
   private static async distilConversation(
     transcript: string,
     _title: string,
-    modelOverride?: string
+    distillProvider?: string,
+    distillModel?: string
   ): Promise<Array<{ type: string; content: string }>> {
     try {
-      const provider = LLMProviderFactory.createProvider();
-      const settings = LLMProviderFactory.getSettings();
-      const azureDeployment = settings.azure?.deployment || settings.azure?.deployments?.[0];
-      const defaultModelId = LLMProviderFactory.getModelId(
-        settings.modelKey,
-        settings.providerType,
-        settings.ollama?.model,
-        settings.gemini?.model,
-        settings.openrouter?.model,
-        settings.openai?.model,
-        azureDeployment,
-        settings.groq?.model,
-        settings.xai?.model,
-        settings.kimi?.model,
-        settings.customProviders,
-        settings.bedrock?.model
-      );
-      const modelId = modelOverride || defaultModelId;
+      // If a provider override is specified, create a provider for that type
+      // (credentials are merged from global settings automatically)
+      const overrideConfig = distillProvider
+        ? { type: distillProvider as LLMProviderType, ...(distillModel ? { model: distillModel } : {}) }
+        : undefined;
+      const provider = LLMProviderFactory.createProvider(overrideConfig);
+
+      // Resolve model ID: explicit override > provider default
+      let modelId: string;
+      if (distillModel) {
+        modelId = distillModel;
+      } else {
+        const settings = LLMProviderFactory.getSettings();
+        const providerType: LLMProviderType = distillProvider
+          ? (distillProvider as LLMProviderType)
+          : settings.providerType;
+        const azureDeployment = settings.azure?.deployment || settings.azure?.deployments?.[0];
+        modelId = LLMProviderFactory.getModelId(
+          settings.modelKey,
+          providerType,
+          settings.ollama?.model,
+          settings.gemini?.model,
+          settings.openrouter?.model,
+          settings.openai?.model,
+          azureDeployment,
+          settings.groq?.model,
+          settings.xai?.model,
+          settings.kimi?.model,
+          settings.customProviders,
+          settings.bedrock?.model
+        );
+      }
 
       const response = await provider.createMessage({
         model: modelId,
