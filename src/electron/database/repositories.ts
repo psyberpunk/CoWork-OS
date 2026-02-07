@@ -519,25 +519,35 @@ export class TaskEventRepository {
       return [];
     }
 
-    const taskPlaceholders = normalizedTaskIds.map(() => '?').join(', ');
-    const args: any[] = [...normalizedTaskIds];
-    let sql = `
-      SELECT * FROM task_events
-      WHERE task_id IN (${taskPlaceholders})
-    `;
-
     const normalizedTypes = (types || []).map((t) => (typeof t === 'string' ? t.trim() : '')).filter(Boolean);
-    if (normalizedTypes.length > 0) {
-      const typePlaceholders = normalizedTypes.map(() => '?').join(', ');
-      sql += ` AND type IN (${typePlaceholders})`;
-      args.push(...normalizedTypes);
+
+    // Chunk task IDs to stay under SQLite's SQLITE_MAX_VARIABLE_NUMBER (999).
+    const CHUNK_SIZE = 500;
+    const allRows: any[] = [];
+
+    for (let i = 0; i < normalizedTaskIds.length; i += CHUNK_SIZE) {
+      const chunk = normalizedTaskIds.slice(i, i + CHUNK_SIZE);
+      const taskPlaceholders = chunk.map(() => '?').join(', ');
+      const args: any[] = [...chunk];
+
+      let sql = `
+        SELECT * FROM task_events
+        WHERE task_id IN (${taskPlaceholders})
+      `;
+
+      if (normalizedTypes.length > 0) {
+        const typePlaceholders = normalizedTypes.map(() => '?').join(', ');
+        sql += ` AND type IN (${typePlaceholders})`;
+        args.push(...normalizedTypes);
+      }
+
+      sql += ' ORDER BY task_id ASC, timestamp ASC';
+
+      const stmt = this.db.prepare(sql);
+      allRows.push(...(stmt.all(...args) as any[]));
     }
 
-    sql += ' ORDER BY task_id ASC, timestamp ASC';
-
-    const stmt = this.db.prepare(sql);
-    const rows = stmt.all(...args) as any[];
-    return rows.map(row => this.mapRowToEvent(row));
+    return allRows.map(row => this.mapRowToEvent(row));
   }
 
   private mapRowToEvent(row: any): TaskEvent {
