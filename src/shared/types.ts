@@ -192,6 +192,7 @@ export const TOOL_GROUPS = {
   // Read-only operations - lowest risk
   'group:read': [
     'read_file',
+    'read_files',
     'list_directory',
     'search_files',
     'system_info',
@@ -1637,6 +1638,12 @@ export const IPC_CHANNELS = {
   // MCP Events
   MCP_SERVER_STATUS_CHANGE: 'mcp:serverStatusChange',
 
+  // Artifact Reputation
+  REPUTATION_GET_SETTINGS: 'reputation:getSettings',
+  REPUTATION_SAVE_SETTINGS: 'reputation:saveSettings',
+  REPUTATION_LIST_MCP: 'reputation:listMcp',
+  REPUTATION_RESCAN_MCP: 'reputation:rescanMcp',
+
   // Built-in Tools Settings
   BUILTIN_TOOLS_GET_SETTINGS: 'builtinTools:getSettings',
   BUILTIN_TOOLS_SAVE_SETTINGS: 'builtinTools:saveSettings',
@@ -1751,6 +1758,9 @@ export const IPC_CHANNELS = {
   MEMORY_GET_STATS: 'memory:getStats',
   MEMORY_CLEAR: 'memory:clear',
   MEMORY_EVENT: 'memory:event',
+  MEMORY_IMPORT_CHATGPT: 'memory:importChatGPT',
+  MEMORY_IMPORT_CHATGPT_PROGRESS: 'memory:importChatGPTProgress',
+  MEMORY_IMPORT_CHATGPT_CANCEL: 'memory:importChatGPTCancel',
 
   // Memory Features (Global Toggles)
   MEMORY_FEATURES_GET_SETTINGS: 'memoryFeatures:getSettings',
@@ -2429,6 +2439,93 @@ export const DEFAULT_BLOCKED_COMMAND_PATTERNS = [
   'format\\s+c:',
   'del\\s+/f\\s+/s\\s+/q',
 ];
+
+// ============ Artifact Reputation Types ============
+
+export type ReputationProvider = 'virustotal';
+
+export type ReputationVerdict = 'clean' | 'unknown' | 'suspicious' | 'malicious' | 'error';
+
+export type ReputationAction = 'allow' | 'warn' | 'block';
+
+export interface ReputationPolicy {
+  clean: ReputationAction;
+  unknown: ReputationAction;
+  suspicious: ReputationAction;
+  malicious: ReputationAction;
+  error: ReputationAction;
+}
+
+export interface ReputationSettingsData {
+  enabled: boolean;
+  provider: ReputationProvider;
+  /** Stored encrypted at rest; typically masked as "***configured***" in the UI when set. */
+  apiKey?: string;
+  /** When true, unknown hashes may be uploaded for analysis (may leak the artifact). */
+  allowUpload: boolean;
+  /** Minimum time between rescans for the same artifact (hours). */
+  rescanIntervalHours: number;
+  /** If enabled, MCP server connects are gated on the current policy outcome. */
+  enforceOnMCPConnect: boolean;
+  /** If a connect is blocked, also disable the server in settings to prevent auto-retries. */
+  disableMCPServerOnBlock: boolean;
+  policy: ReputationPolicy;
+}
+
+export const DEFAULT_REPUTATION_SETTINGS: ReputationSettingsData = {
+  enabled: false,
+  provider: 'virustotal',
+  apiKey: '',
+  allowUpload: false,
+  rescanIntervalHours: 24 * 7, // weekly
+  enforceOnMCPConnect: true,
+  disableMCPServerOnBlock: true,
+  policy: {
+    clean: 'allow',
+    unknown: 'warn',
+    suspicious: 'warn',
+    malicious: 'block',
+    error: 'warn',
+  },
+};
+
+export type ArtifactReputationKind = 'npm_package_tarball';
+
+export type ReputationAnalysisStats = Record<string, number>;
+
+export interface ArtifactReputationEntry {
+  id: string;
+  kind: ArtifactReputationKind;
+  ref: string;
+  provider: ReputationProvider;
+  sha256?: string;
+  verdict: ReputationVerdict;
+  stats?: ReputationAnalysisStats;
+  permalink?: string;
+  error?: string;
+  firstSeenAt: number;
+  lastScannedAt?: number;
+  nextScanAt?: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface MCPArtifactReputationStatus {
+  serverId: string;
+  serverName: string;
+  packageName?: string;
+  version?: string;
+  ref?: string;
+  provider?: ReputationProvider;
+  verdict?: ReputationVerdict;
+  action?: ReputationAction;
+  sha256?: string;
+  stats?: ReputationAnalysisStats;
+  permalink?: string;
+  error?: string;
+  lastScannedAt?: number;
+  nextScanAt?: number;
+}
 
 // App Update types
 export type UpdateMode = 'git' | 'npm' | 'electron-updater';
