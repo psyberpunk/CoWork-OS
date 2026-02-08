@@ -2,7 +2,7 @@
 name: searxng
 description: Search the web using a self-hosted SearXNG metasearch engine. Aggregates Google, Brave, DuckDuckGo, and more without API keys.
 homepage: https://docs.searxng.org
-metadata: {"moltbot":{"emoji":"🔍","requires":{"bins":["python3"],"env":["SEARXNG_URL"]}}}
+metadata: {"cowork":{"emoji":"🔍","requires":{"bins":["python3"],"env":["SEARXNG_URL"]}}}
 ---
 
 # SearXNG Web Search
@@ -21,9 +21,9 @@ Use this skill when the user asks:
 ## Quick start
 
 ```bash
-python3 ~/.clawdbot/skills/searxng/scripts/searxng_search.py "your query"
-python3 ~/.clawdbot/skills/searxng/scripts/searxng_search.py "query" --count 10
-python3 ~/.clawdbot/skills/searxng/scripts/searxng_search.py "query" --lang de
+python3 "$HOME/Library/Application Support/cowork-os/skills/searxng/scripts/searxng_search.py" "your query"
+python3 "$HOME/Library/Application Support/cowork-os/skills/searxng/scripts/searxng_search.py" "query" --count 10
+python3 "$HOME/Library/Application Support/cowork-os/skills/searxng/scripts/searxng_search.py" "query" --lang de
 ```
 
 ## Setup
