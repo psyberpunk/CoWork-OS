@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import { Task, TaskEvent, Workspace, ApprovalRequest, LLMModelInfo, SuccessCriteria, CustomSkill, EventType, TEMP_WORKSPACE_ID, DEFAULT_QUIRKS, CanvasSession } from '../../shared/types';
+import { isVerificationStepDescription } from '../../shared/plan-utils';
 import type { AgentRoleData } from '../../electron/preload';
 import { useVoiceInput } from '../hooks/useVoiceInput';
 import { useAgentContext, type AgentContext } from '../hooks/useAgentContext';
@@ -40,6 +41,24 @@ const IMPORTANT_EVENT_TYPES: EventType[] = [
 // Helper to check if an event is important (shown in non-verbose mode)
 const isImportantEvent = (event: TaskEvent): boolean => {
   return IMPORTANT_EVENT_TYPES.includes(event.type);
+};
+
+// In non-verbose mode, hide verification noise (verification steps are still executed by the agent).
+const isVerificationNoiseEvent = (event: TaskEvent): boolean => {
+  if (event.type === 'assistant_message') {
+    return event.payload?.internal === true;
+  }
+
+  if (event.type === 'step_started' || event.type === 'step_completed') {
+    return isVerificationStepDescription(event.payload?.step?.description);
+  }
+
+  // Goal Mode verification: silent on success, noisy on failure.
+  if (event.type === 'verification_started' || event.type === 'verification_passed') {
+    return true;
+  }
+
+  return false;
 };
 
 const buildTaskTitle = (text: string): string => {
@@ -917,9 +936,11 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
 
   // Filter events based on verbose mode
   const filteredEvents = useMemo(() => {
-    const visibleEvents = verboseSteps ? events : events.filter(isImportantEvent);
+    const baseEvents = verboseSteps ? events : events.filter(isImportantEvent);
     // Command output is rendered separately via CommandOutput component
-    return visibleEvents.filter(event => event.type !== 'command_output');
+    const visibleEvents = baseEvents.filter(event => event.type !== 'command_output');
+    // Always keep explicit verification steps silent; surface failures elsewhere.
+    return visibleEvents.filter(event => !isVerificationNoiseEvent(event));
   }, [events, verboseSteps]);
 
   const latestUserMessageTimestamp = useMemo(() => {
@@ -1036,7 +1057,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   useEffect(() => {
     if (!voiceEnabled || voiceResponseMode === 'manual') return;
 
-    const assistantMessages = events.filter(e => e.type === 'assistant_message');
+    const assistantMessages = events.filter(e => e.type === 'assistant_message' && e.payload?.internal !== true);
     if (assistantMessages.length === 0) return;
 
     const lastMessage = assistantMessages[assistantMessages.length - 1];
@@ -1311,7 +1332,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   // Check if an event has details to show
   const hasEventDetails = (event: TaskEvent): boolean => {
     if (isImageFileEvent(event)) return true;
-    return ['plan_created', 'tool_call', 'tool_result', 'assistant_message', 'error'].includes(event.type);
+    return ['plan_created', 'tool_call', 'tool_result', 'assistant_message', 'error', 'step_failed'].includes(event.type);
   };
 
   // Determine if an event should be expanded by default
@@ -1319,7 +1340,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   // Verbose events (tool calls/results) should be collapsed
   const shouldDefaultExpand = (event: TaskEvent): boolean => {
     if (isImageFileEvent(event)) return true;
-    return ['plan_created', 'assistant_message', 'error'].includes(event.type);
+    return ['plan_created', 'assistant_message', 'error', 'step_failed'].includes(event.type);
   };
 
   // Check if an event is currently expanded using its ID
@@ -2013,7 +2034,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
   };
 
   const getEventDotClass = (type: TaskEvent['type']) => {
-    if (type === 'error' || type === 'verification_failed') return 'error';
+    if (type === 'error' || type === 'step_failed' || type === 'verification_failed') return 'error';
     if (type === 'step_completed' || type === 'task_completed' || type === 'verification_passed') return 'success';
     if (type === 'step_started' || type === 'executing' || type === 'verification_started' || type === 'retry_started') return 'active';
     return '';
@@ -2021,7 +2042,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
 
   // Get the last assistant message to always show the response
   const lastAssistantMessage = useMemo(() => {
-    const assistantMessages = events.filter(e => e.type === 'assistant_message');
+    const assistantMessages = events.filter(e => e.type === 'assistant_message' && e.payload?.internal !== true);
     return assistantMessages.length > 0 ? assistantMessages[assistantMessages.length - 1] : null;
   }, [events]);
 
@@ -2610,7 +2631,14 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                 }
 
                 // Technical events - only show when showSteps is true
-                const alwaysVisibleEvents = new Set(['approval_requested', 'approval_granted', 'approval_denied']);
+                const alwaysVisibleEvents = new Set([
+                  'approval_requested',
+                  'approval_granted',
+                  'approval_denied',
+                  'error',
+                  'step_failed',
+                  'verification_failed',
+                ]);
                 const showEvenWithoutSteps = alwaysVisibleEvents.has(event.type) || isImageFileEvent(event);
                 if (!showSteps && !showEvenWithoutSteps) {
                   // Even if we're not showing steps, we may still need to render CommandOutput here
@@ -2655,7 +2683,7 @@ export function MainContent({ task, selectedTaskId, workspace, events, onSendMes
                           </div>
                           <div className="event-time">{formatTime(event.timestamp)}</div>
                         </div>
-                {isExpanded && renderEventDetails(event, voiceEnabled, markdownComponents, { workspacePath: workspace?.path, onOpenViewer: setViewerFilePath })}
+                {isExpanded && renderEventDetails(event, voiceEnabled, markdownComponents, { workspacePath: workspace?.path, onOpenViewer: setViewerFilePath, hideVerificationSteps: true })}
                       </div>
                     </div>
                     {shouldRenderCommandOutput && (
@@ -2996,6 +3024,8 @@ function renderEventTitle(
       return getMessage('stepStarted', msgCtx, event.payload.step?.description || 'Getting started...');
     case 'step_completed':
       return getMessage('stepCompleted', msgCtx, event.payload.step?.description || event.payload.message);
+    case 'step_failed':
+      return `Step failed: ${event.payload.step?.description || 'Unknown step'}`;
     case 'tool_call':
       return `Using: ${event.payload.tool}`;
     case 'tool_result': {
@@ -3070,6 +3100,7 @@ function renderEventDetails(
   options?: {
     workspacePath?: string;
     onOpenViewer?: (path: string) => void;
+    hideVerificationSteps?: boolean;
   }
 ) {
   const workspacePath = options?.workspacePath;
@@ -3077,19 +3108,26 @@ function renderEventDetails(
   const imageExt = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i;
 
   switch (event.type) {
-    case 'plan_created':
+    case 'plan_created': {
+      const planSteps = Array.isArray(event.payload.plan?.steps)
+        ? event.payload.plan.steps
+        : [];
+      const visiblePlanSteps = options?.hideVerificationSteps
+        ? planSteps.filter((step: any) => !isVerificationStepDescription(step?.description))
+        : planSteps;
       return (
         <div className="event-details">
           <div style={{ marginBottom: 8, fontWeight: 500 }}>{event.payload.plan?.description}</div>
-          {event.payload.plan?.steps && (
+          {visiblePlanSteps.length > 0 && (
             <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {event.payload.plan.steps.map((step: any, i: number) => (
+              {visiblePlanSteps.map((step: any, i: number) => (
                 <li key={i} style={{ marginBottom: 4 }}>{step.description}</li>
               ))}
             </ul>
           )}
         </div>
       );
+    }
     case 'tool_call':
       return (
         <div className="event-details event-details-scrollable">
@@ -3114,6 +3152,12 @@ function renderEventDetails(
             <MessageCopyButton text={event.payload.message} />
             <MessageSpeakButton text={event.payload.message} voiceEnabled={voiceEnabled} />
           </div>
+        </div>
+      );
+    case 'step_failed':
+      return (
+        <div className="event-details" style={{ background: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.2)' }}>
+          {event.payload?.reason || event.payload?.step?.error || 'Step failed.'}
         </div>
       );
     case 'file_created':

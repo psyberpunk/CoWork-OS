@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Task, Workspace, TaskEvent, PlanStep, QueueStatus } from '../../shared/types';
+import { isVerificationStepDescription } from '../../shared/plan-utils';
 import { FileViewer } from './FileViewer';
 import { useAgentContext } from '../hooks/useAgentContext';
 
@@ -128,9 +129,19 @@ export function RightPanel({ task, workspace, events, tasks = [], queueStatus, o
         const step = steps.find(s => s.id === event.payload.step.id);
         if (step) step.status = 'completed';
       }
+      if (event.type === 'step_failed' && event.payload.step) {
+        const step = steps.find(s => s.id === event.payload.step.id);
+        if (step) {
+          step.status = 'failed';
+          if (event.payload.reason && !step.error) step.error = String(event.payload.reason);
+        }
+      }
     });
 
-    return steps;
+    // Hide the explicit verification step (unless it failed).
+    return steps.filter(step =>
+      !isVerificationStepDescription(step.description) || step.status === 'failed'
+    );
   }, [events]);
 
   // Extract files from events

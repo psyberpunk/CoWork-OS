@@ -1,4 +1,5 @@
 import { TaskEvent, DEFAULT_QUIRKS } from '../../shared/types';
+import { isVerificationStepDescription } from '../../shared/plan-utils';
 import { ThemeIcon } from './ThemeIcon';
 import {
   AlertTriangleIcon,
@@ -44,8 +45,18 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
     'follow_up_completed', // internal follow-up tracking
     'follow_up_failed',    // internal follow-up tracking
   ];
+
+  const isVerificationNoiseEvent = (event: TaskEvent): boolean => {
+    if (event.type === 'assistant_message') return event.payload?.internal === true;
+    if (event.type === 'step_started' || event.type === 'step_completed') {
+      return isVerificationStepDescription(event.payload?.step?.description);
+    }
+    if (event.type === 'verification_started' || event.type === 'verification_passed') return true;
+    return false;
+  };
+
   const blockedEvents = events.filter(e => e.type === 'tool_blocked');
-  const visibleEvents = events.filter(e => !internalEventTypes.includes(e.type));
+  const visibleEvents = events.filter(e => !internalEventTypes.includes(e.type) && !isVerificationNoiseEvent(e));
 
   const formatTime = (timestamp: number) => {
     return new Date(timestamp).toLocaleTimeString(undefined, {
@@ -156,7 +167,9 @@ export function TaskTimeline({ events, agentContext }: TaskTimelineProps) {
             <div className="plan-description">{event.payload.plan?.description}</div>
             {event.payload.plan?.steps && (
               <ul className="plan-steps">
-                {event.payload.plan.steps.map((step: any, i: number) => (
+                {event.payload.plan.steps
+                  .filter((step: any) => !isVerificationStepDescription(step?.description))
+                  .map((step: any, i: number) => (
                   <li key={i}>{step.description}</li>
                 ))}
               </ul>
