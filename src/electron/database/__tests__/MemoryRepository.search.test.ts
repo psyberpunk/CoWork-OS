@@ -79,5 +79,33 @@ describe('MemoryRepository.search', () => {
     expect(String(all.mock.calls[0][0])).toContain(',');
     expect(String(all.mock.calls[1][0])).toContain(' OR ');
   });
-});
 
+  it('searchImportedGlobal uses global imported filter (no workspace constraint)', () => {
+    const row = {
+      id: 'mem-imp-1',
+      summary: null,
+      content: '[Imported from ChatGPT - "Any WS"]\nPMNL sessions.',
+      type: 'insight',
+      created_at: 1710000002000,
+      task_id: null,
+      score: -0.2,
+    };
+
+    const all = vi.fn((ftsQuery: string) => {
+      // Only return a row when the relaxed OR query is used, to prove retry works.
+      if (!ftsQuery.includes(' OR ')) return [];
+      return [row];
+    });
+
+    const mockDb = {
+      prepare: vi.fn(() => ({ all })),
+    };
+
+    const repo = new MemoryRepository(mockDb as any);
+    const results = repo.searchImportedGlobal('PMNL Portuguese support', 10, true);
+
+    expect(results).toHaveLength(1);
+    // Called twice: raw and relaxed
+    expect(all).toHaveBeenCalledTimes(2);
+  });
+});

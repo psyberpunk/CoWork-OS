@@ -9,6 +9,7 @@ import { EventEmitter } from 'events';
 import type { DatabaseManager } from '../database/schema';
 import {
   MemoryRepository,
+  MemoryEmbeddingRepository,
   MemorySummaryRepository,
   MemorySettingsRepository,
   Memory,
@@ -21,6 +22,7 @@ import {
 import { LLMProviderFactory } from '../agent/llm';
 import { estimateTokens } from '../agent/context-manager';
 import { InputSanitizer } from '../agent/security';
+import { cosineSimilarity, createLocalEmbedding, tokenizeForLocalEmbedding } from './local-embedding';
 
 // Privacy patterns to exclude - matches common sensitive data patterns
 const SENSITIVE_PATTERNS = [
@@ -61,8 +63,21 @@ const COMPRESSION_DELAY_MS = 200;
 
 export class MemoryService {
   private static memoryRepo: MemoryRepository;
+  private static embeddingRepo: MemoryEmbeddingRepository;
   private static summaryRepo: MemorySummaryRepository;
   private static settingsRepo: MemorySettingsRepository;
+  private static memoryEmbeddingsByWorkspace = new Map<
+    string,
+    Map<string, { updatedAt: number; embedding: Float32Array }>
+  >();
+  private static importedEmbeddings = new Map<
+    string,
+    { updatedAt: number; embedding: Float32Array; workspaceId: string }
+  >();
+  private static importedEmbeddingsLoaded = false;
+  private static importedEmbeddingBackfillInProgress = false;
+  private static embeddingsLoadedForWorkspace = new Set<string>();
+  private static embeddingBackfillInProgress = new Set<string>();
   private static initialized = false;
   private static compressionQueue: string[] = [];
   private static compressionInProgress = false;
@@ -76,6 +91,7 @@ export class MemoryService {
 
     const db = dbManager.getDatabase();
     this.memoryRepo = new MemoryRepository(db);
+    this.embeddingRepo = new MemoryEmbeddingRepository(db);
     this.summaryRepo = new MemorySummaryRepository(db);
     this.settingsRepo = new MemorySettingsRepository(db);
     this.initialized = true;
@@ -146,6 +162,17 @@ export class MemoryService {
       isPrivate: finalIsPrivate,
     });
 
+    // Best-effort: maintain local semantic index for offline hybrid retrieval.
+    // This is fast and runs locally; failures shouldn't break capture.
+    try {
+      const embedText = this.normalizeForEmbedding(memory.summary, memory.content);
+      const embedding = createLocalEmbedding(embedText);
+      this.embeddingRepo.upsert(workspaceId, memory.id, embedding, memory.updatedAt);
+      this.cacheEmbedding(workspaceId, memory.id, embedding, memory.updatedAt);
+    } catch {
+      // ignore
+    }
+
     // Queue for compression if enabled and large enough
     if (settings.compressionEnabled && tokens > MIN_TOKENS_FOR_COMPRESSION && !finalIsPrivate) {
       this.compressionQueue.push(memory.id);
@@ -165,7 +192,262 @@ export class MemoryService {
   static search(workspaceId: string, query: string, limit = 20): MemorySearchResult[] {
     this.ensureInitialized();
     // Include private memories — private means not shared externally, not hidden from the owner
-    return this.memoryRepo.search(workspaceId, query, limit, true);
+    const lexicalLimit = Math.min(Math.max(limit, 5), 50);
+    const lexicalLocal = this.memoryRepo.search(workspaceId, query, lexicalLimit, true);
+    const lexicalImportedGlobal = this.memoryRepo.searchImportedGlobal(query, lexicalLimit, true);
+
+    // Kick off a background backfill for imported ChatGPT histories (and any other memories)
+    // so semantic recall improves over time without requiring re-import.
+    this.kickoffEmbeddingBackfill(workspaceId);
+    this.kickoffImportedEmbeddingBackfill();
+
+    // Hybrid (offline semantic + BM25):
+    // - use lexical BM25 to get candidate set
+    // - compute local embedding similarity as a second signal
+    // - merge + rerank for better recall on imported ChatGPT memories and natural language prompts
+    try {
+      const tokens = tokenizeForLocalEmbedding(query);
+      if (tokens.length < 2) {
+        return this.mergeLexicalOnly(lexicalLocal, lexicalImportedGlobal, limit);
+      }
+
+      this.ensureEmbeddingsLoaded(workspaceId);
+      const workspaceEmbeddings = this.memoryEmbeddingsByWorkspace.get(workspaceId);
+      this.ensureImportedEmbeddingsLoaded();
+
+      const candidateIds = new Set<string>();
+      for (const r of lexicalLocal) candidateIds.add(r.id);
+      for (const r of lexicalImportedGlobal) candidateIds.add(r.id);
+
+      const queryEmbedding = createLocalEmbedding(query);
+      if (queryEmbedding.every((v) => v === 0)) {
+        return this.mergeLexicalOnly(lexicalLocal, lexicalImportedGlobal, limit);
+      }
+
+      // Semantic candidate set: scan local embeddings and keep top K.
+      const semanticK = Math.min(Math.max(limit * 3, 30), 120);
+      const semanticCandidates: Array<{ id: string; score: number }> = [];
+      if (workspaceEmbeddings && workspaceEmbeddings.size > 0) {
+        for (const [memoryId, entry] of workspaceEmbeddings.entries()) {
+          const score = cosineSimilarity(queryEmbedding, entry.embedding);
+          if (!Number.isFinite(score) || score <= 0) continue;
+          semanticCandidates.push({ id: memoryId, score });
+        }
+      }
+
+      // Global semantic scan over imported ChatGPT embeddings.
+      if (this.importedEmbeddings.size > 0) {
+        for (const [memoryId, entry] of this.importedEmbeddings.entries()) {
+          const score = cosineSimilarity(queryEmbedding, entry.embedding);
+          if (!Number.isFinite(score) || score <= 0) continue;
+          semanticCandidates.push({ id: memoryId, score });
+        }
+      }
+      semanticCandidates.sort((a, b) => b.score - a.score);
+      for (const cand of semanticCandidates.slice(0, semanticK)) {
+        candidateIds.add(cand.id);
+      }
+
+      const scored: Array<{ result: MemorySearchResult; score: number }> = [];
+
+      // Map lexical results for baseline score; keep stable if semantic is unavailable.
+      const lexicalRankLocal = new Map<string, number>();
+      lexicalLocal.forEach((r, idx) => lexicalRankLocal.set(r.id, idx));
+      const lexicalRankImported = new Map<string, number>();
+      lexicalImportedGlobal.forEach((r, idx) => lexicalRankImported.set(r.id, idx));
+
+      const semanticScoreById = new Map<string, number>();
+      for (const cand of semanticCandidates.slice(0, semanticK)) {
+        semanticScoreById.set(cand.id, cand.score);
+      }
+
+      // Pull full memory rows for candidates to generate snippets.
+      const candidates = this.memoryRepo.getFullDetails(Array.from(candidateIds));
+      for (const mem of candidates) {
+        const semantic = semanticScoreById.get(mem.id) ?? 0;
+        const idxLocal = lexicalRankLocal.get(mem.id);
+        const idxImported = lexicalRankImported.get(mem.id);
+        const baselineLocal = idxLocal === undefined ? 0 : 1 / (1 + idxLocal);
+        const baselineImported = idxImported === undefined ? 0 : 1 / (1 + idxImported);
+        const baseline = Math.max(baselineLocal, baselineImported);
+
+        // Weighted hybrid score. Favor lexical when present but allow semantic to lift matches.
+        const hybrid = 0.55 * semantic + 0.45 * baseline;
+
+        scored.push({
+          result: {
+            id: mem.id,
+            snippet: mem.summary || this.truncate(mem.content, 200),
+            type: mem.type,
+            relevanceScore: hybrid,
+            createdAt: mem.createdAt,
+            taskId: mem.taskId,
+            source: 'db' as const,
+          },
+          score: hybrid,
+        });
+      }
+
+      scored.sort((a, b) => b.score - a.score || b.result.createdAt - a.result.createdAt);
+      return scored.slice(0, limit).map((s) => s.result);
+    } catch {
+      return this.mergeLexicalOnly(lexicalLocal, lexicalImportedGlobal, limit);
+    }
+  }
+
+  private static mergeLexicalOnly(
+    local: MemorySearchResult[],
+    imported: MemorySearchResult[],
+    limit: number
+  ): MemorySearchResult[] {
+    const seen = new Set<string>();
+    const out: MemorySearchResult[] = [];
+    for (const r of local) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      out.push(r);
+      if (out.length >= limit) return out;
+    }
+    for (const r of imported) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      out.push(r);
+      if (out.length >= limit) return out;
+    }
+    return out;
+  }
+
+  private static ensureEmbeddingsLoaded(workspaceId: string): void {
+    // Lazy load persisted embeddings for a workspace into memory.
+    // If the table doesn't exist yet (older DB), this will throw and be ignored by callers.
+    if (this.embeddingsLoadedForWorkspace.has(workspaceId)) return;
+    try {
+      const embeddings = this.embeddingRepo.getByWorkspace(workspaceId);
+      const map = new Map<string, { updatedAt: number; embedding: Float32Array }>();
+      for (const row of embeddings) {
+        if (Array.isArray(row.embedding) && row.embedding.length > 0) {
+          map.set(row.memoryId, { updatedAt: row.updatedAt, embedding: Float32Array.from(row.embedding) });
+        }
+      }
+      this.memoryEmbeddingsByWorkspace.set(workspaceId, map);
+    } catch {
+      // ignore, feature will still work via in-memory embeddings computed on demand
+    } finally {
+      this.embeddingsLoadedForWorkspace.add(workspaceId);
+    }
+  }
+
+  private static cacheEmbedding(
+    workspaceId: string,
+    memoryId: string,
+    embedding: number[],
+    updatedAt: number
+  ): void {
+    let ws = this.memoryEmbeddingsByWorkspace.get(workspaceId);
+    if (!ws) {
+      ws = new Map();
+      this.memoryEmbeddingsByWorkspace.set(workspaceId, ws);
+    }
+    ws.set(memoryId, { updatedAt, embedding: Float32Array.from(embedding) });
+  }
+
+  private static kickoffEmbeddingBackfill(workspaceId: string): void {
+    if (this.embeddingBackfillInProgress.has(workspaceId)) return;
+    this.embeddingBackfillInProgress.add(workspaceId);
+
+    // Run asynchronously so search stays responsive.
+    setTimeout(() => {
+      this.runEmbeddingBackfill(workspaceId).catch(() => {
+        // ignore
+      });
+    }, 25);
+  }
+
+  private static async runEmbeddingBackfill(workspaceId: string): Promise<void> {
+    const batchSize = 250;
+    const maxBatchesPerRun = 200; // hard safety cap
+    try {
+      for (let batch = 0; batch < maxBatchesPerRun; batch++) {
+        const missing = this.embeddingRepo.findMissingOrStale(workspaceId, batchSize);
+        if (missing.length === 0) break;
+
+        for (const mem of missing) {
+          const text = this.normalizeForEmbedding(mem.summary, mem.content);
+          const embedding = createLocalEmbedding(text);
+          // Persist and cache.
+          this.embeddingRepo.upsert(workspaceId, mem.memoryId, embedding, mem.updatedAt);
+          this.cacheEmbedding(workspaceId, mem.memoryId, embedding, mem.updatedAt);
+        }
+
+        // Yield to avoid monopolizing the event loop on large histories.
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    } finally {
+      this.embeddingBackfillInProgress.delete(workspaceId);
+    }
+  }
+
+  private static normalizeForEmbedding(summary: string | undefined, content: string): string {
+    let text = (summary || content || '').trim();
+    // Strip ChatGPT import tag to reduce noise in semantic space.
+    text = text.replace(/^\[Imported from ChatGPT[^\]]*\]\s*/i, '');
+    // Keep a bounded prefix for speed and to avoid pathological inputs.
+    if (text.length > 12000) text = text.slice(0, 12000);
+    return text;
+  }
+
+  private static ensureImportedEmbeddingsLoaded(): void {
+    if (this.importedEmbeddingsLoaded) return;
+    try {
+      // Load in one go; typical sizes are manageable (thousands to tens of thousands).
+      const rows = this.embeddingRepo.getImportedGlobal(200000, 0);
+      for (const row of rows) {
+        if (!Array.isArray(row.embedding) || row.embedding.length === 0) continue;
+        this.importedEmbeddings.set(row.memoryId, {
+          updatedAt: row.updatedAt,
+          embedding: Float32Array.from(row.embedding),
+          workspaceId: row.workspaceId,
+        });
+      }
+    } catch {
+      // ignore
+    } finally {
+      this.importedEmbeddingsLoaded = true;
+    }
+  }
+
+  private static kickoffImportedEmbeddingBackfill(): void {
+    if (this.importedEmbeddingBackfillInProgress) return;
+    this.importedEmbeddingBackfillInProgress = true;
+    setTimeout(() => {
+      this.runImportedEmbeddingBackfill().catch(() => {
+        // ignore
+      });
+    }, 25);
+  }
+
+  private static async runImportedEmbeddingBackfill(): Promise<void> {
+    const batchSize = 400;
+    const maxBatchesPerRun = 400;
+    try {
+      for (let batch = 0; batch < maxBatchesPerRun; batch++) {
+        const missing = this.embeddingRepo.findMissingOrStaleImportedGlobal(batchSize);
+        if (missing.length === 0) break;
+        for (const mem of missing) {
+          const text = this.normalizeForEmbedding(mem.summary, mem.content);
+          const embedding = createLocalEmbedding(text);
+          this.embeddingRepo.upsert(mem.workspaceId, mem.memoryId, embedding, mem.updatedAt);
+          this.importedEmbeddings.set(mem.memoryId, {
+            updatedAt: mem.updatedAt,
+            embedding: Float32Array.from(embedding),
+            workspaceId: mem.workspaceId,
+          });
+        }
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    } finally {
+      this.importedEmbeddingBackfillInProgress = false;
+    }
   }
 
   /**
@@ -220,22 +502,29 @@ export class MemoryService {
 
     // Search for relevant memories based on task prompt
     let relevantMemories: MemorySearchResult[] = [];
+    let relevantImported: MemorySearchResult[] = [];
     if (taskPrompt && taskPrompt.length > 10) {
       try {
         // Extract key terms for search
         const searchTerms = this.extractSearchTerms(taskPrompt);
         if (searchTerms) {
           relevantMemories = this.memoryRepo.search(workspaceId, searchTerms, 5, true);
+          // Imported ChatGPT history is global across workspaces.
+          relevantImported = this.memoryRepo.searchImportedGlobal(searchTerms, 5, true);
           // Filter out memories that are already in recent
           const recentIds = new Set(recentMemories.map((m) => m.id));
           relevantMemories = relevantMemories.filter((m) => !recentIds.has(m.id));
+          relevantImported = relevantImported.filter((m) => !recentIds.has(m.id));
+          // Also filter imported vs local duplicates.
+          const localIds = new Set(relevantMemories.map((m) => m.id));
+          relevantImported = relevantImported.filter((m) => !localIds.has(m.id));
         }
       } catch {
         // Search failed, continue without relevant memories
       }
     }
 
-    if (recentMemories.length === 0 && relevantMemories.length === 0) {
+    if (recentMemories.length === 0 && relevantMemories.length === 0 && relevantImported.length === 0) {
       return '';
     }
 
@@ -260,6 +549,15 @@ export class MemoryService {
       for (const result of relevantMemories) {
         const date = new Date(result.createdAt).toLocaleDateString();
         // Sanitize memory content to prevent injection via stored memories
+        const sanitizedSnippet = InputSanitizer.sanitizeMemoryContent(result.snippet);
+        parts.push(`- [${result.type}] (${date}) ${sanitizedSnippet}`);
+      }
+    }
+
+    if (relevantImported.length > 0) {
+      parts.push('\n## Imported ChatGPT History (Global)');
+      for (const result of relevantImported) {
+        const date = new Date(result.createdAt).toLocaleDateString();
         const sanitizedSnippet = InputSanitizer.sanitizeMemoryContent(result.snippet);
         parts.push(`- [${result.type}] (${date}) ${sanitizedSnippet}`);
       }
@@ -319,7 +617,17 @@ export class MemoryService {
    */
   static deleteImported(workspaceId: string): number {
     this.ensureInitialized();
+    // Remove embeddings first (embeddings table references memories by id).
+    try {
+      this.embeddingRepo.deleteImported(workspaceId);
+    } catch {
+      // ignore
+    }
     const deleted = this.memoryRepo.deleteImported(workspaceId);
+    // Clear caches for this workspace (best-effort).
+    this.memoryEmbeddingsByWorkspace.delete(workspaceId);
+    this.embeddingsLoadedForWorkspace.delete(workspaceId);
+    this.embeddingBackfillInProgress.delete(workspaceId);
     memoryEvents.emit('memoryChanged', { type: 'importedDeleted', workspaceId });
     return deleted;
   }
@@ -331,6 +639,14 @@ export class MemoryService {
     this.ensureInitialized();
     this.memoryRepo.deleteByWorkspace(workspaceId);
     this.summaryRepo.deleteByWorkspace(workspaceId);
+    try {
+      this.embeddingRepo.deleteByWorkspace(workspaceId);
+    } catch {
+      // ignore
+    }
+    this.memoryEmbeddingsByWorkspace.delete(workspaceId);
+    this.embeddingsLoadedForWorkspace.delete(workspaceId);
+    this.embeddingBackfillInProgress.delete(workspaceId);
     memoryEvents.emit('memoryChanged', { type: 'cleared', workspaceId });
   }
 
@@ -552,6 +868,12 @@ Summary:`,
       this.cleanupIntervalHandle = undefined;
     }
     memoryEvents.removeAllListeners();
+    this.memoryEmbeddingsByWorkspace.clear();
+    this.importedEmbeddings.clear();
+    this.importedEmbeddingsLoaded = false;
+    this.importedEmbeddingBackfillInProgress = false;
+    this.embeddingsLoadedForWorkspace.clear();
+    this.embeddingBackfillInProgress.clear();
     this.initialized = false;
     console.log('[MemoryService] Shutdown complete');
   }

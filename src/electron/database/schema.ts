@@ -491,6 +491,16 @@ export class DatabaseManager {
         FOREIGN KEY (task_id) REFERENCES tasks(id)
       );
 
+      -- Local semantic embeddings for hybrid memory retrieval (offline)
+      CREATE TABLE IF NOT EXISTS memory_embeddings (
+        memory_id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        embedding TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+        FOREIGN KEY (memory_id) REFERENCES memories(id)
+      );
+
       -- Aggregated semantic summaries
       CREATE TABLE IF NOT EXISTS memory_summaries (
         id TEXT PRIMARY KEY,
@@ -524,6 +534,7 @@ export class DatabaseManager {
       CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
       CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
       CREATE INDEX IF NOT EXISTS idx_memories_compressed ON memories(is_compressed);
+      CREATE INDEX IF NOT EXISTS idx_memory_embeddings_workspace ON memory_embeddings(workspace_id);
       CREATE INDEX IF NOT EXISTS idx_memory_summaries_workspace ON memory_summaries(workspace_id);
       CREATE INDEX IF NOT EXISTS idx_memory_summaries_period ON memory_summaries(time_period, period_start);
     `);

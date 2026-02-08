@@ -24,9 +24,11 @@ import { InputSanitizer } from '../agent/security';
 import { estimateTokens } from '../agent/context-manager';
 import {
   MemoryRepository,
+  MemoryEmbeddingRepository,
   MemorySettingsRepository,
 } from '../database/repositories';
 import { DatabaseManager } from '../database/schema';
+import { createLocalEmbedding } from './local-embedding';
 
 // ── ChatGPT export format types ────────────────────────────────
 
@@ -171,6 +173,7 @@ export class ChatGPTImporter {
     // Get repository directly to bypass autoCapture check
     const db = DatabaseManager.getInstance().getDatabase();
     const memoryRepo = new MemoryRepository(db);
+    const embeddingRepo = new MemoryEmbeddingRepository(db);
     const settingsRepo = new MemorySettingsRepository(db);
 
     const result: ChatGPTImportResult = {
@@ -325,7 +328,7 @@ export class ChatGPTImporter {
             // which checks autoCapture setting and would block imports
             const isPrivate = forcePrivate || settings.privacyMode === 'strict' || containsSensitiveData(memoryContent);
 
-            memoryRepo.create({
+            const created = memoryRepo.create({
               workspaceId,
               taskId: undefined,
               type: entry.type as 'observation' | 'decision' | 'insight',
@@ -334,6 +337,16 @@ export class ChatGPTImporter {
               isCompressed: false,
               isPrivate,
             });
+
+            // Best-effort: store offline embedding so imported histories are immediately
+            // searchable with hybrid retrieval (no reindex step required).
+            try {
+              const embedText = sanitized;
+              const embedding = createLocalEmbedding(embedText);
+              embeddingRepo.upsert(workspaceId, created.id, embedding, created.updatedAt);
+            } catch {
+              // ignore
+            }
 
             result.memoriesCreated++;
           }

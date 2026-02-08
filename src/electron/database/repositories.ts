@@ -2105,6 +2105,13 @@ export type MemorySearchResult =
       endLine: number;
     };
 
+export interface MemoryEmbedding {
+  memoryId: string;
+  workspaceId: string;
+  embedding: number[];
+  updatedAt: number;
+}
+
 export interface MemoryTimelineEntry {
   id: string;
   content: string;
@@ -2311,6 +2318,97 @@ export class MemoryRepository {
   }
 
   /**
+   * Search imported ChatGPT memories across ALL workspaces.
+   * This is intentionally global so sessions from any workspace can retrieve imported history.
+   */
+  searchImportedGlobal(query: string, limit = 20, includePrivate = false): MemorySearchResult[] {
+    const privacyFilter = includePrivate ? '' : 'AND m.is_private = 0';
+    try {
+      const stmt = this.db.prepare(`
+        SELECT m.id, m.summary, m.content, m.type, m.created_at, m.task_id,
+               bm25(memories_fts) as score
+        FROM memories_fts f
+        JOIN memories m ON f.rowid = m.rowid
+        WHERE memories_fts MATCH ?
+          AND m.content LIKE '[Imported from ChatGPT %'
+          ${privacyFilter}
+        ORDER BY score
+        LIMIT ?
+      `);
+
+      const raw = (query || '').trim();
+      if (!raw) return [];
+      const tokenized = this.buildRelaxedFtsQuery(raw);
+
+      let rows: Record<string, unknown>[] = [];
+      try {
+        rows = stmt.all(raw, limit) as Record<string, unknown>[];
+      } catch {
+        rows = [];
+      }
+
+      if (rows.length === 0 && tokenized) {
+        try {
+          rows = stmt.all(tokenized, limit) as Record<string, unknown>[];
+        } catch {
+          rows = [];
+        }
+      }
+
+      if (rows.length > 0) {
+        return rows.map(row => ({
+          id: row.id as string,
+          snippet: (row.summary as string) || this.truncateToSnippet(row.content as string, 200),
+          type: row.type as MemoryType,
+          relevanceScore: Math.abs(row.score as number),
+          createdAt: row.created_at as number,
+          taskId: (row.task_id as string) || undefined,
+          source: 'db' as const,
+        }));
+      }
+    } catch {
+      // ignore and fall back below
+    }
+
+    // LIKE fallback (global)
+    const raw = (query || '').trim();
+    if (!raw) return [];
+    const tokens = this.tokenizeSearchQuery(raw);
+    const likeTokens = (tokens.length > 0 ? tokens : [raw]).slice(0, 8).filter(Boolean);
+
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+    for (const token of likeTokens) {
+      clauses.push('(m.content LIKE ? OR m.summary LIKE ?)');
+      const like = `%${token}%`;
+      params.push(like, like);
+    }
+
+    const where = clauses.length > 0 ? `AND (${clauses.join(' OR ')})` : '';
+    const stmt = this.db.prepare(`
+      SELECT m.id, m.summary, m.content, m.type, m.created_at, m.task_id
+      FROM memories m
+      WHERE m.content LIKE '[Imported from ChatGPT %'
+        ${includePrivate ? '' : 'AND m.is_private = 0'}
+        ${where}
+      ORDER BY m.created_at DESC
+      LIMIT ?
+    `);
+
+    params.push(limit);
+    const rows = stmt.all(...params) as Record<string, unknown>[];
+    return rows.map(row => ({
+      id: row.id as string,
+      snippet: (row.summary as string) || this.truncateToSnippet(row.content as string, 200),
+      type: row.type as MemoryType,
+      relevanceScore: 1,
+      createdAt: row.created_at as number,
+      taskId: (row.task_id as string) || undefined,
+      source: 'db' as const,
+    }));
+  }
+
+  /**
    * Layer 2: Get timeline context around a specific memory
    * Returns surrounding memories within a time window
    */
@@ -2364,6 +2462,18 @@ export class MemoryRepository {
       LIMIT ?
     `);
     const rows = stmt.all(workspaceId, limit) as Record<string, unknown>[];
+    return rows.map(row => this.mapRowToMemory(row));
+  }
+
+  getRecentImportedGlobal(limit = 20, includePrivate = false): Memory[] {
+    const privacyFilter = includePrivate ? '' : 'AND is_private = 0';
+    const stmt = this.db.prepare(`
+      SELECT * FROM memories
+      WHERE content LIKE '[Imported from ChatGPT %' ${privacyFilter}
+      ORDER BY created_at DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(limit) as Record<string, unknown>[];
     return rows.map(row => this.mapRowToMemory(row));
   }
 
@@ -2530,6 +2640,178 @@ export class MemoryRepository {
       createdAt: row.created_at as number,
       updatedAt: row.updated_at as number,
     };
+  }
+}
+
+export class MemoryEmbeddingRepository {
+  constructor(private db: Database.Database) {}
+
+  upsert(workspaceId: string, memoryId: string, embedding: number[], updatedAt = Date.now()): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO memory_embeddings (memory_id, workspace_id, embedding, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(memory_id) DO UPDATE SET
+        workspace_id = excluded.workspace_id,
+        embedding = excluded.embedding,
+        updated_at = excluded.updated_at
+    `);
+    stmt.run(memoryId, workspaceId, JSON.stringify(embedding), updatedAt);
+  }
+
+  getByWorkspace(workspaceId: string): MemoryEmbedding[] {
+    const stmt = this.db.prepare(`
+      SELECT memory_id, workspace_id, embedding, updated_at
+      FROM memory_embeddings
+      WHERE workspace_id = ?
+    `);
+    const rows = stmt.all(workspaceId) as Array<{
+      memory_id: string;
+      workspace_id: string;
+      embedding: string;
+      updated_at: number;
+    }>;
+
+    const results: MemoryEmbedding[] = [];
+    for (const row of rows) {
+      try {
+        const parsed = JSON.parse(row.embedding) as number[];
+        if (!Array.isArray(parsed)) continue;
+        results.push({
+          memoryId: row.memory_id,
+          workspaceId: row.workspace_id,
+          embedding: parsed,
+          updatedAt: row.updated_at,
+        });
+      } catch {
+        // ignore malformed row
+      }
+    }
+    return results;
+  }
+
+  getStats(workspaceId: string): { count: number } {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM memory_embeddings
+      WHERE workspace_id = ?
+    `);
+    const row = stmt.get(workspaceId) as Record<string, unknown>;
+    return { count: row.count as number };
+  }
+
+  /**
+   * Find memories that are missing embeddings or have stale embeddings.
+   * Ordered by most-recently-updated first so results improve quickly.
+   */
+  findMissingOrStale(
+    workspaceId: string,
+    limit = 500
+  ): Array<{ memoryId: string; updatedAt: number; content: string; summary?: string }> {
+    const stmt = this.db.prepare(`
+      SELECT m.id as memory_id, m.updated_at, m.content, m.summary, e.updated_at as emb_updated_at
+      FROM memories m
+      LEFT JOIN memory_embeddings e ON e.memory_id = m.id
+      WHERE m.workspace_id = ?
+        AND (e.memory_id IS NULL OR e.updated_at < m.updated_at)
+      ORDER BY m.updated_at DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(workspaceId, limit) as Array<{
+      memory_id: string;
+      updated_at: number;
+      content: string;
+      summary: string | null;
+      emb_updated_at: number | null;
+    }>;
+    return rows.map((r) => ({
+      memoryId: r.memory_id,
+      updatedAt: r.updated_at,
+      content: r.content,
+      summary: r.summary || undefined,
+    }));
+  }
+
+  getImportedGlobal(limit = 5000, offset = 0): Array<MemoryEmbedding & { workspaceId: string }> {
+    const stmt = this.db.prepare(`
+      SELECT e.memory_id, e.workspace_id, e.embedding, e.updated_at
+      FROM memory_embeddings e
+      JOIN memories m ON m.id = e.memory_id
+      WHERE m.content LIKE '[Imported from ChatGPT %'
+      ORDER BY e.updated_at DESC
+      LIMIT ? OFFSET ?
+    `);
+    const rows = stmt.all(limit, offset) as Array<{
+      memory_id: string;
+      workspace_id: string;
+      embedding: string;
+      updated_at: number;
+    }>;
+
+    const results: Array<MemoryEmbedding & { workspaceId: string }> = [];
+    for (const row of rows) {
+      try {
+        const parsed = JSON.parse(row.embedding) as number[];
+        if (!Array.isArray(parsed)) continue;
+        results.push({
+          memoryId: row.memory_id,
+          workspaceId: row.workspace_id,
+          embedding: parsed,
+          updatedAt: row.updated_at,
+        });
+      } catch {
+        // ignore
+      }
+    }
+    return results;
+  }
+
+  findMissingOrStaleImportedGlobal(
+    limit = 500
+  ): Array<{ memoryId: string; workspaceId: string; updatedAt: number; content: string; summary?: string }> {
+    const stmt = this.db.prepare(`
+      SELECT m.id as memory_id, m.workspace_id, m.updated_at, m.content, m.summary, e.updated_at as emb_updated_at
+      FROM memories m
+      LEFT JOIN memory_embeddings e ON e.memory_id = m.id
+      WHERE m.content LIKE '[Imported from ChatGPT %'
+        AND (e.memory_id IS NULL OR e.updated_at < m.updated_at)
+      ORDER BY m.updated_at DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(limit) as Array<{
+      memory_id: string;
+      workspace_id: string;
+      updated_at: number;
+      content: string;
+      summary: string | null;
+      emb_updated_at: number | null;
+    }>;
+    return rows.map((r) => ({
+      memoryId: r.memory_id,
+      workspaceId: r.workspace_id,
+      updatedAt: r.updated_at,
+      content: r.content,
+      summary: r.summary || undefined,
+    }));
+  }
+
+  deleteByWorkspace(workspaceId: string): number {
+    const stmt = this.db.prepare('DELETE FROM memory_embeddings WHERE workspace_id = ?');
+    const result = stmt.run(workspaceId);
+    return result.changes;
+  }
+
+  deleteImported(workspaceId: string): number {
+    // Must be called before deleting imported memories from the memories table.
+    const stmt = this.db.prepare(`
+      DELETE FROM memory_embeddings
+      WHERE workspace_id = ?
+        AND memory_id IN (
+          SELECT id FROM memories
+          WHERE workspace_id = ? AND content LIKE '[Imported from ChatGPT %'
+        )
+    `);
+    const result = stmt.run(workspaceId, workspaceId);
+    return result.changes;
   }
 }
 
