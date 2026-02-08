@@ -86,8 +86,8 @@ Configure per workspace in **Settings > Workspaces**:
 |------------|-------------|---------|
 | Read | Read files | Yes |
 | Write | Create/modify files | Yes |
-| Delete | Delete files | Yes (with approval) |
-| Shell | Run shell commands | Yes (with approval) |
+| Delete | Delete files (always approval-gated) | No |
+| Shell | Run shell commands (always approval-gated) | No |
 | Network | Browser/web access | Yes |
 
 ### Allowed Paths

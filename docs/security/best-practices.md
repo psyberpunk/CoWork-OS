@@ -224,7 +224,7 @@ Only to the configured LLM provider (Anthropic/AWS Bedrock). No data is sent to 
 
 ### Q: Are my API keys stored securely?
 
-API keys are stored locally in the app data directory. Consider using environment variables for sensitive keys.
+API keys are stored locally and encrypted (OS keychain when available, with AES-256 fallback). Keys are decrypted only when needed for API calls and are never passed to shell commands or subprocesses.
 
 ### Q: Can other users see my clipboard?
 

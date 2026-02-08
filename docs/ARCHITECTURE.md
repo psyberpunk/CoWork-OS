@@ -41,6 +41,7 @@ CoWork OS exposes "tools" to the agent. Tools include:
 - Web search + web fetch (multi-provider)
 - Browser automation (Playwright)
 - Shell execution (sandboxed + approvals)
+- Vision: analyze workspace images (screenshots/photos) via `analyze_image`
 - Integrations: Google Drive/Gmail/Calendar, Dropbox, Box, OneDrive, SharePoint, Notion
 - MCP tools from external MCP servers
 
@@ -83,6 +84,15 @@ Core gateway code:
 - Gateway manager: `src/electron/gateway/index.ts`
 - Router: `src/electron/gateway/router.ts`
 - Shared channel types: `src/electron/gateway/channels/types.ts`
+
+Channel commands (chat):
+- `/schedule ...` creates scheduled agent tasks that deliver results back to the originating chat (works in DM + group contexts).
+- `/digest [lookback]` generates an on-demand digest of recent chat messages (group-safe; uses the local channel message store).
+- `/followups [lookback]` extracts follow-ups/commitments from recent chat messages (group-safe; uses the local channel message store).
+
+Attachment handling:
+- If an inbound channel message includes `attachments`, the gateway persists them under `<workspace>/.cowork/inbox/attachments/...`
+- The persisted workspace paths are appended into the task prompt so agents can inspect them with normal file tools (and `analyze_image` for images)
 
 Security modes commonly used by channels:
 - `pairing`: require a pairing code
@@ -151,6 +161,12 @@ Code:
 Scheduling:
 - Cron jobs can create tasks on schedules (`at`, `every`, `cron`) and optionally deliver results to channels.
 - Cron webhooks can trigger jobs externally (disabled by default).
+- For noisy monitors, delivery can be configured to only post on success when a non-empty result is available (used by `/schedule ... --if-result ...`).
+- Job prompts support template variables such as `{{today}}`, `{{tomorrow}}`, `{{week_end}}`, `{{now}}`.
+- If a job is configured with channel delivery (for example jobs created via `/schedule`), prompts can also use:
+  - `{{chat_messages}}` (recent incoming messages for that chat)
+  - `{{chat_since}}`, `{{chat_until}}` (ISO timestamps for the rendered window)
+  - `{{chat_message_count}}`, `{{chat_truncated}}`
 
 Code:
 - Cron service: `src/electron/cron/service.ts`
@@ -248,10 +264,10 @@ Key code:
 
 ### 14. Reporting / Export (Local)
 
-CoWork OS includes local task export utilities (intended for reporting/sharing without "phone home" telemetry).
+CoWork OS includes local task export utilities (intended for reporting/sharing without any "phone home" telemetry).
 
 Key code:
-- Task export: `src/electron/telemetry/task-export.ts`
+- Task export: `src/electron/reports/task-export.ts`
 
 ### 15. Roadmap / WIP: Agent Teams
 

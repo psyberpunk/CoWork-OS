@@ -180,9 +180,14 @@ All settings are now stored encrypted in the database using the `SecureSettingsR
 
 | Data | Location | Encryption |
 |------|----------|------------|
-| All Settings | `~/.config/CoWork-OS/cowork-os.db` | OS Keychain + AES-256 |
-| Database | `~/.config/CoWork-OS/cowork-os.db` | Settings encrypted per-category |
-| Machine ID | `~/.config/CoWork-OS/.cowork-machine-id` | Stable identifier for encryption |
+| All Settings | `app.getPath('userData')/cowork-os.db` | OS Keychain + AES-256 |
+| Database | `app.getPath('userData')/cowork-os.db` | Settings encrypted per-category |
+| Machine ID | `app.getPath('userData')/.cowork-machine-id` | Stable identifier for encryption |
+
+Typical `userData` locations:
+- macOS: `~/Library/Application Support/cowork-os/`
+- Linux: `~/.config/cowork-os/`
+- Windows: `%APPDATA%\\cowork-os\\`
 
 ### Encryption Layers
 
@@ -227,10 +232,12 @@ Each stored setting includes:
 ### What's Stored in the Database
 
 - Workspace configurations
-- Task history and logs
+- Task history, events, and logs (including task prompts and timeline messages)
 - Channel/gateway configurations
+- Channel message history (incoming/outgoing message content for configured channels)
 - **All encrypted settings** (API keys, preferences, configurations)
-- No conversation content is permanently stored
+
+Everything is stored **locally** on your machine. CoWork OS does not upload your database or message history to any CoWork OS servers.
 
 ### API Key Security
 
@@ -572,7 +579,7 @@ CoWork OS is designed with security in mind:
 ### Guardrails Settings Location
 
 All guardrail settings can be configured at:
-- **Database**: Stored encrypted in `~/.config/CoWork-OS/cowork-os.db` (category: `guardrails`)
+- **Database**: Stored encrypted in `app.getPath('userData')/cowork-os.db` (category: `guardrails`)
 - **UI**: Settings (gear icon) → Guardrails tab
 
 ### Settings Migration
