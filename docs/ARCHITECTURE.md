@@ -42,11 +42,15 @@ CoWork OS exposes "tools" to the agent. Tools include:
 - Browser automation (Playwright)
 - Shell execution (sandboxed + approvals)
 - Vision: analyze workspace images (screenshots/photos) via `analyze_image`
+- Image generation: `generate_image` with multi-provider support (Gemini, OpenAI, Azure OpenAI) and automatic provider selection
+- Visual annotation: `visual_open_annotator` / `visual_update_annotator` for iterative image refinement via Live Canvas
 - Integrations: Google Drive/Gmail/Calendar, Dropbox, Box, OneDrive, SharePoint, Notion
 - MCP tools from external MCP servers
 
 Key code:
 - Tool registry and execution: `src/electron/agent/tools/registry.ts`
+- Image generation: `src/electron/agent/skills/image-generator.ts`
+- Visual annotation tools: `src/electron/agent/tools/visual-tools.ts`
 - Sandbox runner: `src/electron/agent/sandbox/runner.ts`
 - Built-in skill definitions (prompted workflows): `resources/skills/`
 - Skill loading precedence: `src/electron/agent/custom-skill-loader.ts`
@@ -136,12 +140,16 @@ CoWork OS can store and retrieve local memories per workspace, with:
 - Optional workspace kit (`.cowork/`) initialization + indexing for durable human-edited context
 - Project contexts under `.cowork/projects/<projectId>/` with per-project access rules
 - ChatGPT export import (distilled via LLM, stored locally)
+- Cross-workspace search for imported ChatGPT memories (`searchImportedGlobal`)
+- Local vector embeddings for memory similarity (no external API required)
 
 Key code:
 - Memory service: `src/electron/memory/MemoryService.ts`
+- Local embeddings: `src/electron/memory/local-embedding.ts`
 - Workspace kit extraction: `src/electron/memory/WorkspaceKitContext.ts`
 - Markdown indexing + redaction: `src/electron/memory/MarkdownMemoryIndexService.ts`
 - ChatGPT importer: `src/electron/memory/ChatGPTImporter.ts`
+- Embedding repository: `src/electron/database/repositories.ts` (`MemoryEmbeddingRepository`)
  - Project access rules: `src/electron/security/project-access.ts`
 
 Docs:
@@ -388,7 +396,7 @@ Major table families (non-exhaustive):
 - Tasks and execution logs: `tasks`, `task_events`, `artifacts`, `approvals`
 - Workspaces: `workspaces`
 - Channels + gateway state: `channels`, `channel_users`, `channel_sessions`, `channel_messages`, plus queue/rate limit/audit tables
-- Memory: `memories`, `memory_summaries`, `memory_settings`, and optional FTS tables/triggers
+- Memory: `memories`, `memory_summaries`, `memory_settings`, `memory_embeddings`, and optional FTS tables/triggers
 - Secure encrypted settings: `secure_settings`
 - "Mission Control" features: `agent_roles`, `agent_mentions`, `agent_working_state`, `task_subscriptions`, `standup_reports`, etc.
 
@@ -431,7 +439,8 @@ Update `docs/ARCHITECTURE.md` when you change:
 - Control plane protocol/ports or remote access defaults
 - Cron/hooks default ports/paths or behavior
 - MCP client/host behavior, registry, or built-in connectors
-- Memory system behavior (retention, injection, redaction, indexing)
+- Memory system behavior (retention, injection, redaction, indexing, embeddings)
+- Image generation providers, visual annotation tools, or related skills
 
 Suggested PR checklist addition (recommended policy):
 - If your change is user-visible or changes defaults: include a doc update in the same PR.

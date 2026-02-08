@@ -31,6 +31,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Conditional delivery: `deliverOnlyIfResult` skips posting when the task produces no output
 - **Chat Transcript Formatter** - New `formatChatTranscriptForPrompt()` utility for injecting chat history into agent prompts
 - **Tool Restrictions Tests** - New test suite for agent tool restriction enforcement
+- **Image Generation (Multi-Provider)** - Generate images via `generate_image` tool with provider auto-selection
+  - Supports **Gemini** (gemini-image-fast, gemini-image-pro), **OpenAI** (gpt-image-1, gpt-image-1.5, DALL-E 3/2), and **Azure OpenAI** (deployment-based)
+  - Model alias resolution (e.g. "gpt-1.5" → gpt-image-1.5, "dalle-3" → dall-e-3)
+  - Provider auto-selection picks the best configured provider when not specified
+  - Azure deployment detection for image-capable deployments
+  - 180-second tool timeout for remote image generation
+- **Visual Annotation Tools** - Agentic generate → annotate → refine → repeat workflow
+  - `visual_open_annotator` - Open Live Canvas with an image for visual annotation
+  - `visual_update_annotator` - Update the annotator with a new iteration image
+  - Structured feedback via canvas interactions (visual_feedback, visual_regenerate, visual_approve)
+- **Agentic Image Loop Skill** - New built-in skill for iterative image refinement
+  - Generate an image, open the Visual Annotator, collect user markup, refine prompt, regenerate
+  - Loops until user approves the result
+- **Inline Image Preview** - Generated images display directly in the task event timeline
+  - Auto-expands for `file_created`/`file_modified` events with image files
+  - Click to open in the full image viewer
+- **Local Embeddings for Memory** - Lightweight local vector embeddings without external API calls
+  - Token-based hashing for 256-dimensional vectors
+  - `MemoryEmbeddingRepository` for persisting embeddings in `memory_embeddings` table
+- **Global Imported Memory Search** - Cross-workspace search for ChatGPT imported memories
+  - `searchImportedGlobal` enables sessions in any workspace to retrieve imported history
+  - FTS with relaxed fallback and LIKE-based backup query
 
 ### Changed
 - **Task Export** - Moved from `telemetry/` to `reports/` to better reflect purpose (structured task summaries, not telemetry)
@@ -42,6 +64,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cron Delivery** - When a task has a non-empty result, delivery messages now include the result text directly instead of a generic status line
 - **Email Client TLS** - Load macOS system keychain CAs for IMAP/SMTP connections (fixes corporate proxy/antivirus TLS inspection)
 - **Email Client IMAP** - Improved response buffering and greeting handling reliability
+- **Image Generation** - Replaced single-provider "nano-banana" model system with multi-provider architecture; removed deprecated model aliases from pricing
+- **Gemini Provider** - Removed `banana` filter from model discovery exclusion list
+- **Verification Steps** - Verification steps are now internal; agent responds with "OK" on success instead of verbose summaries
+- **Task Timeline UI** - Verification step events (step_started, step_completed, verification_started/passed) are filtered from the timeline
+- **Plan Display** - Verification steps hidden from displayed plan step lists (still shown on failure)
+
+### Added (UI)
+- **step_failed Event** - New event type rendered with error styling in task timeline, right panel, and task timeline views
 
 ### Fixed
 - **Gateway Message Logging** - Outgoing message persistence is now best-effort (never fails delivery)

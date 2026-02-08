@@ -300,6 +300,8 @@ Configure in **Settings** > **Appearance**.
 - **Performance Reviews**: Score and review agent-role outcomes, with autonomy-level recommendations
 - **Voice Calls**: Outbound phone calls via ElevenLabs Agents (list agents, list numbers, initiate calls)
 - **Vision**: Analyze workspace images (screenshots, photos, diagrams) via `analyze_image` tool (OpenAI, Anthropic, or Gemini)
+- **Image Generation**: Create images via `generate_image` with multi-provider support (Gemini, OpenAI gpt-image-1/1.5/DALL-E, Azure OpenAI) and automatic provider selection
+- **Visual Annotation**: Iterative image refinement with the Visual Annotator — generate, annotate, refine, repeat until approved
 - **Email IMAP Access**: Direct IMAP mailbox access via `email_imap_unread` — check unread emails without needing Google Workspace
 - **Workspace Recency**: Workspaces ordered by last used time for quick access
 
@@ -1919,6 +1921,7 @@ Configure these in **Settings** > **LLM Provider** by entering API keys/tokens, 
 | **Communication** | Slack, Discord, Telegram, Email, Voice Calls (ElevenLabs Agents) |
 | **Productivity** | Notion, Obsidian, Todoist, Apple Notes/Reminders, PRD Generator, Memory Kit |
 | **Media** | Spotify, YouTube, SoundCloud |
+| **Image** | Image Generation (Gemini/OpenAI/Azure), Agentic Image Loop (visual annotation workflow) |
 | **Documents** | Excel, Word, PDF, PowerPoint |
 | **Frontend** | Frontend Design, React Native Best Practices |
 | **Data** | Supabase SDK Patterns |
@@ -2081,6 +2084,10 @@ Users must comply with their model provider's terms:
 - [x] Chat commands: `/schedule`, `/digest`, `/followups`, `/brief` across all gateway channels
 - [x] Inbound attachment persistence (channel messages save files to `.cowork/inbox/attachments/`)
 - [x] Cron template variables (`{{today}}`, `{{chat_messages}}`, etc.) and conditional delivery
+- [x] Image generation via `generate_image` with multi-provider support (Gemini, OpenAI, Azure OpenAI)
+- [x] Visual annotation tools and Agentic Image Loop skill for iterative image refinement
+- [x] Inline image preview in task event timeline
+- [x] Local memory embeddings and cross-workspace ChatGPT imported memory search
 
 ### Planned
 
