@@ -7,7 +7,7 @@ const DEFAULT_FEATURES: MemoryFeaturesSettings = {
   heartbeatMaintenanceEnabled: true,
 };
 
-export function MemoryHubSettings() {
+export function MemoryHubSettings(props?: { initialWorkspaceId?: string; onSettingsChanged?: () => void }) {
   const [features, setFeatures] = useState<MemoryFeaturesSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -52,6 +52,8 @@ export function MemoryHubSettings() {
       setFeatures(loadedFeatures);
       setWorkspaces(combined);
       setSelectedWorkspaceId((prev) => {
+        const preferred = (props?.initialWorkspaceId || '').trim();
+        if (preferred && combined.some((w) => w.id === preferred)) return preferred;
         if (prev && combined.some((w) => w.id === prev)) return prev;
         return combined[0]?.id || '';
       });
@@ -280,7 +282,7 @@ export function MemoryHubSettings() {
         )}
 
         {selectedWorkspaceId && (
-          <MemorySettings workspaceId={selectedWorkspaceId} />
+          <MemorySettings workspaceId={selectedWorkspaceId} onSettingsChanged={props?.onSettingsChanged} />
         )}
       </div>
     </div>

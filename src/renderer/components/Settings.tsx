@@ -41,7 +41,7 @@ import { NodesSettings } from './NodesSettings';
 import { ExtensionsSettings } from './ExtensionsSettings';
 import { VoiceSettings } from './VoiceSettings';
 import { MissionControlPanel } from './MissionControlPanel';
-import { MemorySettings } from './MemorySettings';
+import { MemoryHubSettings } from './MemoryHubSettings';
 
 type SettingsTab = 'appearance' | 'personality' | 'missioncontrol' | 'tray' | 'voice' | 'llm' | 'search' | 'telegram' | 'slack' | 'whatsapp' | 'teams' | 'x' | 'morechannels' | 'integrations' | 'updates' | 'guardrails' | 'queue' | 'skills' | 'skillhub' | 'connectors' | 'mcp' | 'tools' | 'scheduled' | 'hooks' | 'controlplane' | 'nodes' | 'extensions' | 'memory';
 
@@ -1437,7 +1437,7 @@ export function Settings({ onBack, onSettingsChanged, themeMode, visualTheme, ac
             ) : activeTab === 'extensions' ? (
               <ExtensionsSettings />
             ) : activeTab === 'memory' ? (
-              <MemorySettings workspaceId={workspaceId || ''} onSettingsChanged={onSettingsChanged} />
+              <MemoryHubSettings initialWorkspaceId={workspaceId} onSettingsChanged={onSettingsChanged} />
             ) : loading ? (
               <div className="settings-loading">Loading settings...</div>
             ) : (
