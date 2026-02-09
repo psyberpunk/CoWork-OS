@@ -53,6 +53,32 @@ const MAX_TOOL_RESULT_TOKENS = 10000;
 // Maximum characters per tool result (rough estimate: 4 chars ≈ 1 token)
 const MAX_TOOL_RESULT_CHARS = MAX_TOOL_RESULT_TOKENS * 4;
 
+// Messages that begin with one of these tags are treated as "pinned" and should
+// survive compaction. (They are system-generated context blocks, not normal chat turns.)
+const PINNED_MESSAGE_TAG_PREFIXES = [
+  '<cowork_memory_recall>',
+  '<cowork_compaction_summary>',
+] as const;
+
+function messageTextForPinnedCheck(message: LLMMessage): string {
+  if (typeof message.content === 'string') return message.content;
+  if (!Array.isArray(message.content)) return '';
+
+  // Prefer the first text block if present.
+  for (const block of message.content as any[]) {
+    if (block && block.type === 'text' && typeof block.text === 'string') {
+      return block.text;
+    }
+  }
+  return '';
+}
+
+function isPinnedMessage(message: LLMMessage): boolean {
+  const text = messageTextForPinnedCheck(message).trimStart();
+  if (!text) return false;
+  return PINNED_MESSAGE_TAG_PREFIXES.some((prefix) => text.startsWith(prefix));
+}
+
 /**
  * Estimate token count from text (rough approximation)
  * LLMs use ~4 characters per token on average for English text
@@ -145,6 +171,30 @@ export function truncateToolResult(result: string): string {
   return truncateToTokens(result, MAX_TOOL_RESULT_TOKENS);
 }
 
+export type CompactionKind = 'none' | 'tool_truncation_only' | 'message_removal';
+
+export type CompactionMeta = {
+  availableTokens: number;
+  originalTokens: number;
+  truncatedToolResults: {
+    didTruncate: boolean;
+    count: number;
+    tokensAfter: number;
+  };
+  removedMessages: {
+    didRemove: boolean;
+    count: number;
+    tokensAfter: number;
+    messages: LLMMessage[];
+  };
+  kind: CompactionKind;
+};
+
+export type CompactionResult = {
+  messages: LLMMessage[];
+  meta: CompactionMeta;
+};
+
 /**
  * Context Manager class
  */
@@ -172,38 +222,86 @@ export class ContextManager {
     messages: LLMMessage[],
     systemPromptTokens: number = 0
   ): LLMMessage[] {
+    return this.compactMessagesWithMeta(messages, systemPromptTokens).messages;
+  }
+
+  compactMessagesWithMeta(
+    messages: LLMMessage[],
+    systemPromptTokens: number = 0
+  ): CompactionResult {
     const availableTokens = this.getAvailableTokens(systemPromptTokens);
     let currentTokens = estimateTotalTokens(messages);
 
     // If we're within limits, return as-is
     if (currentTokens <= availableTokens) {
-      return messages;
+      return {
+        messages,
+        meta: {
+          availableTokens,
+          originalTokens: currentTokens,
+          truncatedToolResults: { didTruncate: false, count: 0, tokensAfter: currentTokens },
+          removedMessages: { didRemove: false, count: 0, tokensAfter: currentTokens, messages: [] },
+          kind: 'none',
+        },
+      };
     }
 
     console.log(`Context too large (${currentTokens} tokens), compacting...`);
 
     // Strategy 1: Truncate large tool results
-    const truncatedMessages = this.truncateLargeResults(messages);
-    currentTokens = estimateTotalTokens(truncatedMessages);
+    const truncated = this.truncateLargeResultsWithMeta(messages);
+    currentTokens = estimateTotalTokens(truncated.messages);
 
     if (currentTokens <= availableTokens) {
       console.log(`After truncating tool results: ${currentTokens} tokens`);
-      return truncatedMessages;
+      return {
+        messages: truncated.messages,
+        meta: {
+          availableTokens,
+          originalTokens: estimateTotalTokens(messages),
+          truncatedToolResults: {
+            didTruncate: truncated.count > 0,
+            count: truncated.count,
+            tokensAfter: currentTokens,
+          },
+          removedMessages: { didRemove: false, count: 0, tokensAfter: currentTokens, messages: [] },
+          kind: 'tool_truncation_only',
+        },
+      };
     }
 
     // Strategy 2: Remove older message pairs (keep first and recent)
-    const compactedMessages = this.removeOlderMessages(truncatedMessages, availableTokens);
-    currentTokens = estimateTotalTokens(compactedMessages);
+    const removed = this.removeOlderMessagesWithMeta(truncated.messages, availableTokens);
+    currentTokens = estimateTotalTokens(removed.messages);
 
-    console.log(`After compaction: ${currentTokens} tokens, ${compactedMessages.length} messages`);
-    return compactedMessages;
+    console.log(`After compaction: ${currentTokens} tokens, ${removed.messages.length} messages`);
+    return {
+      messages: removed.messages,
+      meta: {
+        availableTokens,
+        originalTokens: estimateTotalTokens(messages),
+        truncatedToolResults: {
+          didTruncate: truncated.count > 0,
+          count: truncated.count,
+          tokensAfter: estimateTotalTokens(truncated.messages),
+        },
+        removedMessages: {
+          didRemove: removed.removedMessages.length > 0,
+          count: removed.removedMessages.length,
+          tokensAfter: currentTokens,
+          messages: removed.removedMessages,
+        },
+        kind: removed.removedMessages.length > 0 ? 'message_removal' : 'tool_truncation_only',
+      },
+    };
   }
 
   /**
    * Truncate large tool results in messages
    */
-  private truncateLargeResults(messages: LLMMessage[]): LLMMessage[] {
-    return messages.map(msg => {
+  private truncateLargeResultsWithMeta(messages: LLMMessage[]): { messages: LLMMessage[]; count: number } {
+    let truncatedCount = 0;
+    const out = messages.map(msg => {
       if (typeof msg.content === 'string') return msg;
 
       // Check if this message has tool results
@@ -213,10 +311,12 @@ export class ContextManager {
       // Truncate tool results
       const newContent = msg.content.map(content => {
         if (content.type === 'tool_result') {
+          const next = truncateToolResult(content.content);
+          if (next !== content.content) truncatedCount += 1;
           return {
             type: 'tool_result' as const,
             tool_use_id: content.tool_use_id,
-            content: truncateToolResult(content.content),
+            content: next,
             ...(content.is_error ? { is_error: content.is_error } : {}),
           };
         }
@@ -225,27 +325,38 @@ export class ContextManager {
 
       return { ...msg, content: newContent };
     });
+    return { messages: out, count: truncatedCount };
   }
 
   /**
    * Remove older messages while preserving conversation flow
    */
-  private removeOlderMessages(messages: LLMMessage[], targetTokens: number): LLMMessage[] {
-    if (messages.length <= 2) return messages;
+  private removeOlderMessagesWithMeta(
+    messages: LLMMessage[],
+    targetTokens: number
+  ): { messages: LLMMessage[]; removedMessages: LLMMessage[] } {
+    if (messages.length <= 2) return { messages, removedMessages: [] };
 
     // Keep first message (task context) and work backwards from end
-    const result: LLMMessage[] = [];
     let currentTokens = 0;
+    const keep = new Set<number>();
 
     // Always keep the first message (original task)
     const firstMsg = messages[0];
     const firstMsgTokens = estimateMessageTokens(firstMsg);
-    result.push(firstMsg);
+    keep.add(0);
     currentTokens += firstMsgTokens;
 
-    // Add messages from the end until we hit the limit
-    const recentMessages: LLMMessage[] = [];
+    // Always keep pinned messages (system-generated context blocks).
+    for (let i = 1; i < messages.length; i++) {
+      if (!isPinnedMessage(messages[i])) continue;
+      keep.add(i);
+      currentTokens += estimateMessageTokens(messages[i]);
+    }
+
+    // Add messages from the end until we hit the limit (preserve recency).
     for (let i = messages.length - 1; i > 0; i--) {
+      if (keep.has(i)) continue;
       const msg = messages[i];
       const msgTokens = estimateMessageTokens(msg);
 
@@ -253,21 +364,19 @@ export class ContextManager {
         break;
       }
 
-      recentMessages.unshift(msg);
+      keep.add(i);
       currentTokens += msgTokens;
     }
 
-    // If we removed messages, add a summary placeholder
-    const removedCount = messages.length - 1 - recentMessages.length;
-    if (removedCount > 0) {
-      result.push({
-        role: 'user',
-        content: `[Previous ${removedCount} conversation turns summarized: The assistant has been working on the task, executing tools and making progress. Continue from where we left off.]`,
-      });
+    const keptIndices = Array.from(keep).sort((a, b) => a - b);
+    const compacted = keptIndices.map((i) => messages[i]);
+
+    const removedMessages: LLMMessage[] = [];
+    for (let i = 1; i < messages.length; i++) {
+      if (!keep.has(i)) removedMessages.push(messages[i]);
     }
 
-    result.push(...recentMessages);
-    return result;
+    return { messages: compacted, removedMessages };
   }
 
   /**
