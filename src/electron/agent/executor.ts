@@ -114,6 +114,13 @@ const IMAGE_FILE_EXTENSION_REGEX = /\.(png|jpe?g|webp|gif|bmp)$/i;
 // Allow a small buffer for file timestamp granularity/clock skew.
 const IMAGE_VERIFICATION_TIME_SKEW_MS = 1000;
 
+// When the context is nearing compaction, flush a durable summary to memory/kit so
+// dropped context doesn't erase important decisions/open loops.
+const PRE_COMPACTION_FLUSH_SLACK_TOKENS = 1200;
+const PRE_COMPACTION_FLUSH_COOLDOWN_MS = 2 * 60 * 1000;
+const PRE_COMPACTION_FLUSH_MAX_OUTPUT_TOKENS = 220;
+const PRE_COMPACTION_FLUSH_MIN_TOKEN_DELTA = 250;
+
 /**
  * Check if an error is non-retryable (quota/rate limit related)
  * These errors indicate a systemic problem with the tool/API
@@ -1078,6 +1085,8 @@ export class TaskExecutor {
   private readonly shouldPauseForQuestions: boolean;
   private dispatchedMentionedAgents = false;
   private lastAssistantText: string | null = null;
+  private lastPreCompactionFlushAt: number = 0;
+  private lastPreCompactionFlushTokenCount: number = 0;
 
   private static readonly MIN_RESULT_SUMMARY_LENGTH = 20;
   private static readonly RESULT_SUMMARY_PLACEHOLDERS = new Set<string>([
@@ -1327,13 +1336,277 @@ ${transcript}
     summaryBlock: string;
   }): Promise<void> {
     if (!opts.allowMemoryInjection) return;
-    const content = (opts.summaryBlock || '').trim();
+    const content = this.extractPinnedBlockContent(opts.summaryBlock, TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG, TaskExecutor.PINNED_COMPACTION_SUMMARY_CLOSE_TAG);
     if (!content) return;
 
     try {
       await MemoryService.capture(opts.workspaceId, opts.taskId, 'summary', content, false);
     } catch {
       // optional enhancement
+    }
+  }
+
+  private extractPinnedBlockContent(block: string, openTag: string, closeTag: string): string {
+    const raw = (block || '').trim();
+    if (!raw) return '';
+
+    const openIdx = raw.indexOf(openTag);
+    if (openIdx === -1) return InputSanitizer.sanitizeMemoryContent(raw).trim();
+
+    const start = openIdx + openTag.length;
+    const closeIdx = raw.indexOf(closeTag, start);
+    if (closeIdx === -1) return InputSanitizer.sanitizeMemoryContent(raw).trim();
+
+    return InputSanitizer.sanitizeMemoryContent(raw.slice(start, closeIdx)).trim();
+  }
+
+  private async buildPreCompactionFlushSummary(opts: {
+    messages: LLMMessage[];
+    maxOutputTokens: number;
+    contextLabel: string;
+  }): Promise<string> {
+    const messages = opts.messages || [];
+    if (messages.length === 0) return '';
+    if (!Number.isFinite(opts.maxOutputTokens) || opts.maxOutputTokens <= 0) return '';
+
+    const maxInputChars = 14000;
+    const filtered = messages.filter((m) => {
+      if (typeof m.content !== 'string') return true;
+      const t = m.content.trimStart();
+      if (!t) return true;
+      if (t.startsWith(TaskExecutor.PINNED_MEMORY_RECALL_TAG)) return false;
+      if (t.startsWith(TaskExecutor.PINNED_COMPACTION_SUMMARY_TAG)) return false;
+      return true;
+    });
+    const transcript = this.formatMessagesForCompactionSummary(filtered, maxInputChars);
+    const contextLabel = opts.contextLabel || 'task';
+
+    const system = 'You write compact, durable memory flush summaries for ongoing agent sessions.';
+    const user = `This agent session is nearing context compaction. Write a compact, structured "memory flush" so future turns can recover key decisions and open loops even if earlier context is dropped.
+
+Output format (REQUIRED):
+Decisions:
+- ...
+Open Loops:
+- ...
+Next Actions:
+- ...
+Key Findings:
+- ... (optional, include tool outputs, file paths, errors, or critical facts)
+
+Requirements:
+- Output ONLY the summary content, no preamble.
+- Be factual. Avoid speculation.
+- Capture: goals, decisions, key findings/tool outputs, files/paths, errors, open loops, next actions.
+- Do NOT include secrets, API keys, tokens, or large raw outputs.
+- Keep it short and scannable (bullets).
+
+Context: ${contextLabel}
+
+Transcript (abridged):
+${transcript}
+`;
+
+    const outputBudget = Math.max(32, Math.min(opts.maxOutputTokens, 600));
+
+    try {
+      const response = await this.callLLMWithRetry(
+        () => withTimeout(
+          this.provider.createMessage({
+            model: this.modelId,
+            maxTokens: outputBudget,
+            system,
+            messages: [{ role: 'user', content: user }],
+            signal: this.abortController.signal,
+          }),
+          LLM_TIMEOUT_MS,
+          'Pre-compaction flush'
+        ),
+        'Pre-compaction flush'
+      );
+
+      if (response.usage) {
+        this.updateTracking(response.usage.inputTokens, response.usage.outputTokens);
+      }
+
+      const text = (response.content || [])
+        .filter((c: any) => c.type === 'text' && c.text)
+        .map((c: any) => c.text)
+        .join('\n')
+        .trim();
+      if (!text) return '';
+
+      const sanitized = InputSanitizer.sanitizeMemoryContent(text).trim();
+      return truncateToTokens(sanitized, outputBudget);
+    } catch {
+      // Deterministic fallback: store a truncated transcript instead of losing everything.
+      const fallback = truncateToTokens(InputSanitizer.sanitizeMemoryContent(transcript).trim(), outputBudget);
+      return `Memory flush (raw, truncated):\n${fallback}`;
+    }
+  }
+
+  private async maybePreCompactionMemoryFlush(opts: {
+    messages: LLMMessage[];
+    systemPromptTokens: number;
+    allowMemoryInjection: boolean;
+    contextLabel: string;
+  }): Promise<void> {
+    if (!opts.allowMemoryInjection) return;
+
+    const now = Date.now();
+    if (this.lastPreCompactionFlushAt && (now - this.lastPreCompactionFlushAt) < PRE_COMPACTION_FLUSH_COOLDOWN_MS) {
+      return;
+    }
+
+    const messages = opts.messages || [];
+    if (messages.length < 4) return;
+
+    const availableTokens = this.contextManager.getAvailableTokens(opts.systemPromptTokens);
+    const currentTokens = estimateTotalTokens(messages);
+    const slack = availableTokens - currentTokens;
+
+    if (slack > PRE_COMPACTION_FLUSH_SLACK_TOKENS) return;
+    if (this.lastPreCompactionFlushTokenCount && currentTokens < this.lastPreCompactionFlushTokenCount + PRE_COMPACTION_FLUSH_MIN_TOKEN_DELTA) {
+      return;
+    }
+
+    const summary = await this.buildPreCompactionFlushSummary({
+      messages,
+      maxOutputTokens: PRE_COMPACTION_FLUSH_MAX_OUTPUT_TOKENS,
+      contextLabel: opts.contextLabel,
+    });
+
+    const trimmed = (summary || '').trim();
+    if (!trimmed) return;
+
+    this.lastPreCompactionFlushAt = now;
+    this.lastPreCompactionFlushTokenCount = currentTokens;
+
+    const iso = new Date(now).toISOString();
+    const content = `Pre-compaction memory flush (${iso})\nContext: ${opts.contextLabel}\n\n${trimmed}`;
+
+    try {
+      await MemoryService.capture(this.workspace.id, this.task.id, 'summary', content, false);
+    } catch {
+      // Memory service might be disabled/unavailable; still attempt kit write below.
+    }
+
+    await this.appendPreCompactionFlushToKitDailyLog(trimmed).catch(() => {
+      // optional enhancement
+    });
+
+    this.daemon.logEvent(this.task.id, 'log', {
+      message: 'Pre-compaction memory flush saved.',
+      details: { slackTokens: slack, currentTokens, availableTokens },
+    });
+  }
+
+  private async appendPreCompactionFlushToKitDailyLog(summary: string): Promise<void> {
+    if (!this.workspace.permissions.write) return;
+
+    const kitRoot = path.join(this.workspace.path, '.cowork');
+    try {
+      const stat = fs.statSync(kitRoot);
+      if (!stat.isDirectory()) return;
+    } catch {
+      return;
+    }
+
+    const now = new Date();
+    const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const memDir = path.join(kitRoot, 'memory');
+    try {
+      await fs.promises.mkdir(memDir, { recursive: true });
+    } catch {
+      return;
+    }
+
+    const dailyPath = path.join(memDir, `${stamp}.md`);
+    const ensureTemplate = async () => {
+      try {
+        await fs.promises.stat(dailyPath);
+      } catch {
+        const template =
+          `# Daily Log (${stamp})\n\n` +
+          `## Open Loops\n\n` +
+          `## Next Actions\n\n` +
+          `## Decisions\n`;
+        await fs.promises.writeFile(dailyPath, template, 'utf8');
+      }
+    };
+    await ensureTemplate();
+
+    let existing = '';
+    try {
+      existing = await fs.promises.readFile(dailyPath, 'utf8');
+    } catch {
+      return;
+    }
+
+    const parseBullets = (label: string): string[] => {
+      const lines = summary.split('\n');
+      const esc = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const headerRe = new RegExp(`^\\s*${esc}\\s*:\\s*$`, 'i');
+      const startIdx = lines.findIndex((l) => headerRe.test(l));
+      if (startIdx === -1) return [];
+
+      const out: string[] = [];
+      for (let i = startIdx + 1; i < lines.length; i++) {
+        const raw = lines[i];
+        const trimmed = raw.trim();
+        if (!trimmed) {
+          // Stop if we hit an empty line and already captured something.
+          if (out.length > 0) break;
+          continue;
+        }
+        // Stop at the next section label.
+        if (/^(decisions|open loops|next actions|goals|key findings|key facts)\\s*:/i.test(trimmed)) {
+          break;
+        }
+        if (trimmed.startsWith('-')) out.push(trimmed);
+      }
+      return out;
+    };
+
+    const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const prefixBullets = (bullets: string[]) =>
+      bullets.map((b) => `- [flush ${hhmm}] ${b.replace(/^[-\\s]+/, '').trim()}`).filter(Boolean);
+
+    const decisions = prefixBullets(parseBullets('Decisions'));
+    const openLoops = prefixBullets(parseBullets('Open Loops'));
+    const nextActions = prefixBullets(parseBullets('Next Actions'));
+
+    if (decisions.length === 0 && openLoops.length === 0 && nextActions.length === 0) return;
+
+    const insertUnderHeading = (content: string, heading: string, bullets: string[]): string => {
+      if (bullets.length === 0) return content;
+
+      const idx = content.indexOf(heading);
+      if (idx === -1) {
+        return `${content.trimEnd()}\n\n${heading}\n${bullets.join('\n')}\n`;
+      }
+
+      const afterHeadingIdx = content.indexOf('\n', idx);
+      if (afterHeadingIdx === -1) {
+        return `${content}\n${bullets.join('\n')}\n`;
+      }
+
+      // Insert after heading line and any immediate blank lines.
+      let insertAt = afterHeadingIdx + 1;
+      while (insertAt < content.length && content.slice(insertAt).startsWith('\n')) {
+        insertAt += 1;
+      }
+
+      return content.slice(0, insertAt) + bullets.join('\n') + '\n' + content.slice(insertAt);
+    };
+
+    let updated = existing;
+    updated = insertUnderHeading(updated, '## Decisions', decisions);
+    updated = insertUnderHeading(updated, '## Open Loops', openLoops);
+    updated = insertUnderHeading(updated, '## Next Actions', nextActions);
+
+    if (updated !== existing) {
+      await fs.promises.writeFile(dailyPath, updated, 'utf8');
     }
   }
 
@@ -4326,6 +4599,14 @@ TASK / CONVERSATION HISTORY:
           }
         }
 
+        // Pre-compaction memory flush: store a durable summary before compaction drops context.
+        await this.maybePreCompactionMemoryFlush({
+          messages,
+          systemPromptTokens,
+          allowMemoryInjection,
+          contextLabel: `step:${step.id} ${step.description}`,
+        });
+
         // Compact messages if context is getting too large (with metadata so we can summarize what was dropped).
         const compaction = this.contextManager.compactMessagesWithMeta(messages, systemPromptTokens);
         messages = compaction.messages;
@@ -5311,6 +5592,14 @@ TASK / CONVERSATION HISTORY:
             this.removePinnedUserBlock(messages, TaskExecutor.PINNED_MEMORY_RECALL_TAG);
           }
         }
+
+        // Pre-compaction memory flush: store a durable summary before compaction drops context.
+        await this.maybePreCompactionMemoryFlush({
+          messages,
+          systemPromptTokens,
+          allowMemoryInjection,
+          contextLabel: 'follow-up message',
+        });
 
         // Compact messages if context is getting too large (with metadata so we can summarize what was dropped).
         const compaction = this.contextManager.compactMessagesWithMeta(messages, systemPromptTokens);
