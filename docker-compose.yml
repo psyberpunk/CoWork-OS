@@ -1,0 +1,57 @@
+services:
+  cowork-os:
+    build: .
+    restart: unless-stopped
+    environment:
+      # Persist database/settings.
+      - COWORK_USER_DATA_DIR=/data
+
+      # Optional: bootstrap a default workspace inside the container.
+      - COWORK_BOOTSTRAP_WORKSPACE_PATH=/workspace
+      - COWORK_BOOTSTRAP_WORKSPACE_NAME=main
+
+      # Optional (recommended for headless): import provider creds from env into secure Settings.
+      # This makes it easy to configure LLM/search keys via `docker compose` env vars.
+      - COWORK_IMPORT_ENV_SETTINGS=1
+      # - COWORK_IMPORT_ENV_SETTINGS_MODE=merge   # merge|overwrite
+      # - COWORK_LLM_PROVIDER=openai              # openai|anthropic|gemini|...
+      # - OPENAI_API_KEY=...
+      # - TAVILY_API_KEY=...
+
+      # Bind inside the container on all interfaces, but only publish on host loopback below.
+      - COWORK_CONTROL_PLANE_HOST=0.0.0.0
+      - COWORK_CONTROL_PLANE_PORT=18789
+    volumes:
+      - cowork_data:/data
+      # Default workspace volume (recommended to avoid host permission issues).
+      - cowork_workspace:/workspace
+      # If you prefer a host bind mount, replace the line above with something like:
+      # - /srv/cowork/workspace:/workspace
+    ports:
+      # Security: keep Control Plane local by default.
+      - "127.0.0.1:18789:18789"
+
+  # Optional: Node-only daemon (no Electron/Xvfb). Enable with:
+  #   docker compose --profile node up --build -d cowork-os-node
+  cowork-os-node:
+    profiles: ["node"]
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    restart: unless-stopped
+    environment:
+      - COWORK_USER_DATA_DIR=/data
+      - COWORK_BOOTSTRAP_WORKSPACE_PATH=/workspace
+      - COWORK_BOOTSTRAP_WORKSPACE_NAME=main
+      - COWORK_IMPORT_ENV_SETTINGS=1
+      - COWORK_CONTROL_PLANE_HOST=0.0.0.0
+      - COWORK_CONTROL_PLANE_PORT=18789
+    volumes:
+      - cowork_data:/data
+      - cowork_workspace:/workspace
+    ports:
+      - "127.0.0.1:18789:18789"
+
+volumes:
+  cowork_data:
+  cowork_workspace:

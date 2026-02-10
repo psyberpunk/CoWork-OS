@@ -1,0 +1,310 @@
+# Linux VPS (Headless) Guide
+
+CoWork OS can run on Linux as a long-running daemon in two ways:
+
+1. **Node-only daemon (recommended for VPS)**: no Electron/Xvfb required.
+2. **Headless Electron daemon**: closer to desktop parity, but requires Electron runtime deps + Xvfb.
+
+Both modes can be driven remotely using:
+
+- `--headless` (no Electron windows)
+- The **WebSocket Control Plane** for remote task creation/monitoring
+- Optional channel gateways (Telegram/Discord/Slack/etc) if you’ve configured them in the DB
+
+This mode is designed for VPS/systemd/docker deployments.
+
+## Option A: Docker (Headless Electron)
+
+This repo includes a headless Docker image that runs CoWork OS as a daemon.
+
+1. Build and start:
+
+```bash
+docker compose up --build -d
+```
+
+If you prefer the **Node-only daemon** (no Electron/Xvfb), use the compose profile:
+
+```bash
+docker compose --profile node up --build -d cowork-os-node
+```
+
+Defaults in `docker-compose.yml`:
+
+- Persistent data volume mounted at `/data`
+- A persistent workspace volume mounted at `/workspace` (bootstrapped automatically). You can swap this for a host bind mount if you want CoWork OS to operate on files on the VPS.
+- Control Plane published on host loopback: `127.0.0.1:18789` (safe default)
+
+2. View the Control Plane token (printed on first startup when it’s generated):
+
+```bash
+docker compose logs -f cowork-os
+```
+
+If you need to print it again later, restart with:
+
+- `COWORK_PRINT_CONTROL_PLANE_TOKEN=1` (env) or
+- `--print-control-plane-token` (flag)
+
+## Option B: Systemd (Node-Only Daemon)
+
+This is the simplest non-Docker setup when you don’t want to install Xvfb/Electron GUI deps.
+
+1. Install OS deps (Debian/Ubuntu):
+
+```bash
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  ca-certificates curl git \
+  python3 make g++
+```
+
+2. Install Node.js (22+ recommended) and build CoWork OS:
+
+```bash
+git clone https://github.com/CoWork-OS/CoWork-OS.git /opt/cowork-os
+cd /opt/cowork-os
+npm ci
+npm run build:daemon
+npm run build:connectors
+```
+
+On first start, `bin/coworkd-node.js` may rebuild `better-sqlite3` for your Node version (native addon ABI).
+
+3. Create a dedicated user + data dir:
+
+```bash
+sudo useradd -r -m -s /usr/sbin/nologin cowork || true
+sudo mkdir -p /var/lib/cowork-os
+sudo chown -R cowork:cowork /var/lib/cowork-os
+```
+
+If you cloned/built as `root`, ensure the service user can read (and rebuild native deps if needed):
+
+```bash
+sudo chown -R cowork:cowork /opt/cowork-os
+```
+
+4. Install the systemd unit + env file templates:
+
+- Unit: `deploy/systemd/cowork-os-node.service`
+- Env example: `deploy/systemd/cowork-os.env.example`
+
+```bash
+sudo cp /opt/cowork-os/deploy/systemd/cowork-os.env.example /etc/cowork-os.env
+sudo $EDITOR /etc/cowork-os.env
+
+sudo cp /opt/cowork-os/deploy/systemd/cowork-os-node.service /etc/systemd/system/cowork-os-node.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now cowork-os-node
+
+sudo journalctl -u cowork-os-node -f
+```
+
+## Optional: Browser Automation (Playwright)
+
+CoWork OS includes browser automation tools (Playwright). On minimal Linux VPS images (and especially slim Docker images),
+Chromium may fail to launch until OS dependencies are installed.
+
+If you want browser tools on Debian/Ubuntu, you can install Playwright’s Chromium + dependencies:
+
+```bash
+cd /opt/cowork-os
+sudo npx playwright install --with-deps chromium
+```
+
+If you don’t need browser automation, you can ignore this and rely on `web_fetch` + API-based search providers.
+
+## Option C: Systemd (Headless Electron)
+
+This is a good fit when you don’t want Docker.
+
+1. Install OS deps (Debian/Ubuntu):
+
+```bash
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  ca-certificates curl git \
+  python3 make g++ \
+  xvfb xauth \
+  fonts-liberation \
+  libgtk-3-0 libnss3 libxss1 libasound2 \
+  libgbm1 libdrm2 libxshmfence1 \
+  libatk1.0-0 libatk-bridge2.0-0 \
+  libcups2 libdbus-1-3 libnspr4 \
+  libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 \
+  libxext6 libxfixes3 libxcb1 libxrender1 \
+  libpango-1.0-0 libpangocairo-1.0-0 libcairo2 \
+  libexpat1 libglib2.0-0 libsecret-1-0
+```
+
+2. Install Node.js (22+ recommended) and build CoWork OS:
+
+```bash
+git clone https://github.com/CoWork-OS/CoWork-OS.git /opt/cowork-os
+cd /opt/cowork-os
+npm ci
+npm run build:electron
+npm run build:connectors
+```
+
+3. Create a dedicated user + data dir:
+
+```bash
+sudo useradd -r -m -s /usr/sbin/nologin cowork || true
+sudo mkdir -p /var/lib/cowork-os
+sudo chown -R cowork:cowork /var/lib/cowork-os
+```
+
+4. Install the systemd unit + env file templates:
+
+- Unit: `deploy/systemd/cowork-os.service`
+- Env example: `deploy/systemd/cowork-os.env.example`
+
+Example install commands:
+
+```bash
+sudo cp /opt/cowork-os/deploy/systemd/cowork-os.env.example /etc/cowork-os.env
+sudo $EDITOR /etc/cowork-os.env
+
+sudo cp /opt/cowork-os/deploy/systemd/cowork-os.service /etc/systemd/system/cowork-os.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now cowork-os
+
+sudo journalctl -u cowork-os -f
+```
+
+## Recommended: Persistent Data Directory
+
+On VPS you usually want the DB/settings under a known path (for backups and container volumes).
+
+```bash
+export COWORK_USER_DATA_DIR=/var/lib/cowork-os
+node bin/coworkd-node.js
+```
+
+Or via CLI flag:
+
+```bash
+node bin/coworkd-node.js --user-data-dir /var/lib/cowork-os
+```
+
+## Bootstrapping a Workspace (Important)
+
+Headless instances can’t “Select Folder” via UI, so you must either:
+
+1. Bootstrap a default workspace at startup:
+
+```bash
+export COWORK_BOOTSTRAP_WORKSPACE_PATH=/srv/cowork/workspace
+export COWORK_BOOTSTRAP_WORKSPACE_NAME=main
+```
+
+2. Or create one remotely over the Control Plane using `workspace.create`.
+
+### coworkctl (Simple Control Plane CLI)
+
+Use the bundled helper to call Control Plane methods:
+
+```bash
+export COWORK_CONTROL_PLANE_URL=ws://127.0.0.1:18789
+export COWORK_CONTROL_PLANE_TOKEN=... # from startup logs
+
+node bin/coworkctl.js call workspace.list
+node bin/coworkctl.js call workspace.create '{"name":"main","path":"/srv/cowork/workspace"}'
+node bin/coworkctl.js call config.get
+node bin/coworkctl.js watch --event task.event
+node bin/coworkctl.js tail '<taskId>' --limit 200
+```
+
+## Configure Channels (Headless)
+
+If you want to interact with the agent via Telegram/Discord/Slack/etc on a VPS, you can configure and manage channels over the Control Plane (no desktop UI required).
+
+Examples:
+
+```bash
+node bin/coworkctl.js call channel.list
+
+# Create a Telegram channel (disabled by default; test then enable)
+node bin/coworkctl.js call channel.create '{"type":"telegram","name":"telegram","config":{"botToken":"..."},"securityConfig":{"mode":"pairing"}}'
+node bin/coworkctl.js call channel.test '{"channelId":"..."}'
+node bin/coworkctl.js call channel.enable '{"channelId":"..."}'
+```
+
+## Configure LLM/Search Credentials (Headless)
+
+In desktop mode you’d normally configure providers in the Settings UI. On a VPS, you usually want to configure via env vars.
+
+CoWork OS supports an explicit, opt-in import path:
+
+- `COWORK_IMPORT_ENV_SETTINGS=1` (or `--import-env-settings`)
+- Optional: `COWORK_IMPORT_ENV_SETTINGS_MODE=merge|overwrite`
+- Optional: `COWORK_LLM_PROVIDER=openai|anthropic|gemini|...`
+
+Example (OpenAI):
+
+```bash
+export COWORK_IMPORT_ENV_SETTINGS=1
+export COWORK_LLM_PROVIDER=openai
+export OPENAI_API_KEY=...
+```
+
+Example (search):
+
+```bash
+export COWORK_IMPORT_ENV_SETTINGS=1
+export TAVILY_API_KEY=...
+```
+
+If you rotate keys later, restart with:
+
+```bash
+export COWORK_IMPORT_ENV_SETTINGS_MODE=overwrite
+```
+
+## Control Plane Overrides
+
+You can override bind host/port at startup:
+
+```bash
+export COWORK_CONTROL_PLANE_HOST=127.0.0.1
+export COWORK_CONTROL_PLANE_PORT=18789
+node bin/coworkd-node.js
+```
+
+Keep `host=127.0.0.1` unless you *fully* understand the security implications of binding to `0.0.0.0`.
+
+## Remote Access (SSH Tunnel)
+
+From your local machine:
+
+```bash
+ssh -N -L 18789:127.0.0.1:18789 user@your-vps
+```
+
+Then connect your client to `ws://127.0.0.1:18789` using the printed token.
+
+## Web Dashboard (Browser UI)
+
+When the Control Plane server is running, it also serves a minimal web UI at:
+
+- `http://127.0.0.1:18789/` (over SSH tunnel)
+
+Open it in your browser, paste the Control Plane token, and you can:
+
+- List/create workspaces
+- Create tasks and send messages
+- View task events (recent history + live stream)
+- Approve/deny approvals
+
+Also see: `docs/remote-access.md` (SSH + Tailscale Serve/Funnel).
+
+## Approvals Over Control Plane
+
+In headless mode, approval prompts (shell commands, deletions, etc.) can be handled remotely over the Control Plane:
+
+- CoWork broadcasts `approval_requested` events including an `approvalId`
+- Respond via `approval.respond` with `{ approvalId, approved }`
+
+This enables running a VPS instance without requiring a local UI or messaging channels for approvals.
