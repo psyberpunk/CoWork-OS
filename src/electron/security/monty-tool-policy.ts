@@ -32,6 +32,7 @@ const MAX_LIMITS: MontyResourceLimits = {
 };
 
 const programCache = new MontyProgramCache(24);
+const isTestEnv = !!process.env.VITEST || process.env.NODE_ENV === 'test';
 
 type CachedPolicyFile = { mtimeMs: number; code: string; hash: string };
 const fileCache = new Map<string, CachedPolicyFile>();
@@ -83,7 +84,9 @@ export async function evaluateMontyToolPolicy(args: {
   try {
     cached = await loadPolicyCode(wsPath);
   } catch (err) {
-    console.warn('[ToolPolicy] Failed to read tools.monty:', err);
+    if (!isTestEnv) {
+      console.warn('[ToolPolicy] Failed to read tools.monty:', err);
+    }
     return { decision: 'pass' };
   }
 
@@ -121,10 +124,11 @@ export async function evaluateMontyToolPolicy(args: {
   });
 
   if (!res.ok) {
-    console.warn('[ToolPolicy] tools.monty failed:', res.error);
+    if (!isTestEnv) {
+      console.warn('[ToolPolicy] tools.monty failed:', res.error);
+    }
     return { decision: 'pass' };
   }
 
   return normalizeDecision(res.output) || { decision: 'pass' };
 }
-
