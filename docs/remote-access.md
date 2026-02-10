@@ -12,6 +12,10 @@ The Control Plane WebSocket server binds to `127.0.0.1:18789` by default for sec
 | **Tailscale Serve** | Private network access (Tailnet only) | Medium |
 | **Tailscale Funnel** | Public internet access | Medium |
 
+When the server is running, it also serves a minimal web dashboard at `/` (same host/port).
+This is useful for headless/VPS setups: open the URL in a browser (via tunnel/Tailscale), paste the token, and manage tasks/approvals.
+It also includes basic workspace and channel management so you can bring up a fresh VPS without a desktop UI.
+
 ## SSH Tunnel (Recommended for Personal Use)
 
 SSH tunnels provide secure remote access using standard SSH port forwarding. This is ideal if you already have SSH access to the machine running CoWork.
@@ -19,12 +23,13 @@ SSH tunnels provide secure remote access using standard SSH port forwarding. Thi
 ### Prerequisites
 
 - SSH access to the remote machine running CoWork
-- Control Plane enabled in CoWork settings
-- Authentication token configured
+- Control Plane enabled (desktop Settings UI, or headless flags/env like `node bin/coworkd.js`)
+- Authentication token available (printed on first generation, or via `--print-control-plane-token`)
 
 ### Setup
 
 1. **Enable Control Plane** in CoWork Settings > Control Plane
+   - Headless: start with `node bin/coworkd.js` (enables Control Plane by default)
 2. **Note your token** (copy it for client configuration)
 3. **Create SSH tunnel** from your local machine:
 

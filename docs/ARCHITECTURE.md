@@ -21,6 +21,13 @@ CoWork OS is a **local-first, security-first desktop runtime** for running AI ag
 
 The app is built as an **Electron main process** (backend/orchestration) plus a **React renderer** (UI).
 
+CoWork OS also supports **server/headless deployments** intended for Linux VPS installs:
+
+- Headless Electron daemon: `bin/coworkd.js`
+- Node-only daemon (no Electron/Xvfb): `bin/coworkd-node.js` (entry: `src/daemon/main.ts`)
+
+See: `docs/vps-linux.md`.
+
 ## What CoWork OS Can Do (Capabilities)
 
 ### 1. Run Tasks (Agent Runtime)
@@ -222,7 +229,13 @@ Capabilities:
 
 Key methods (see `src/electron/control-plane/protocol.ts`):
 - Workspaces: `workspace.list`, `workspace.get`
+- Workspaces (admin): `workspace.create`
 - Tasks: `task.create`, `task.get`, `task.list`, `task.cancel`, `task.sendMessage`
+- Tasks (admin): `task.events`
+- Approvals (admin): `approval.list`, `approval.respond`
+- Channels: `channel.list`, `channel.get`
+- Channels (admin): `channel.create`, `channel.update`, `channel.test`, `channel.enable`, `channel.disable`, `channel.remove`
+- Config/Health: `config.get` (sanitized, no secrets)
 
 Key events:
 - `task.event` is broadcast to **operators only** (payloads are sanitized and size-capped).

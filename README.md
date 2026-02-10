@@ -36,7 +36,7 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 | **Security-First** | 2350+ unit tests, configurable guardrails, approval workflows, gateway hardening |
 | **Local-First** | Your data stays on your machine. BYOK (Bring Your Own Key) |
 
-> **Status**: macOS desktop app (cross-platform support planned)
+> **Status**: macOS desktop app + headless/server mode (Linux/VPS). Cross-platform desktop support planned.
 
 ---
 
@@ -83,6 +83,18 @@ npm run package
 ```
 
 The packaged app will be in the `release/` directory.
+
+### Linux VPS (Headless / Server Mode)
+
+Run CoWork OS without a GUI and manage it remotely via the WebSocket Control Plane:
+
+- Guide: `docs/vps-linux.md`
+- Start (Node-only, no Electron/Xvfb): `node bin/coworkd-node.js`
+- Start (headless Electron): `node bin/coworkd.js`
+- Web UI (via tunnel): `http://127.0.0.1:18789/`
+- Headless creds: set `COWORK_IMPORT_ENV_SETTINGS=1` + `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` (see guide)
+- Docker: `docker compose up --build -d`
+- systemd templates: `deploy/systemd/`
 
 ---
 
