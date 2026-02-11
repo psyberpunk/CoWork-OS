@@ -29,6 +29,12 @@ This repo includes a headless Docker image that runs CoWork OS as a daemon.
 ssh -N -L 18789:127.0.0.1:18789 user@your-vps
 ```
 
+If your local machine already uses port `18789`, use a different local port (example: `28789`):
+
+```bash
+ssh -N -L 28789:127.0.0.1:18789 user@your-vps
+```
+
 2. Open the minimal Control Plane Web UI locally:
 
 ```text
@@ -313,6 +319,28 @@ ssh -N -L 18789:127.0.0.1:18789 user@your-vps
 ```
 
 Then connect your client to `ws://127.0.0.1:18789` using the printed token.
+
+If local port `18789` is busy, either:
+
+- Use another fixed local port (`28789`, `38789`, etc.):
+
+```bash
+ssh -N -L 28789:127.0.0.1:18789 user@your-vps
+```
+
+Use `http://127.0.0.1:28789/` and `ws://127.0.0.1:28789`.
+
+- Or auto-pick a free local port:
+
+```bash
+LOCAL_PORT=18789
+while lsof -nP -iTCP:${LOCAL_PORT} -sTCP:LISTEN >/dev/null 2>&1; do
+  LOCAL_PORT=$((LOCAL_PORT + 1))
+done
+echo "Using local port: ${LOCAL_PORT}"
+echo "Open: http://127.0.0.1:${LOCAL_PORT}/"
+ssh -N -L ${LOCAL_PORT}:127.0.0.1:18789 user@your-vps
+```
 
 ## Web Dashboard (Browser UI)
 

@@ -145,6 +145,7 @@ Run CoWork OS without a GUI and manage it remotely via the WebSocket Control Pla
 - Start (Node-only, no Electron/Xvfb): `node bin/coworkd-node.js`
 - Start (headless Electron): `node bin/coworkd.js`
 - Web UI (via tunnel): `http://127.0.0.1:18789/`
+- If local port `18789` is busy, tunnel with another local port (example): `ssh -N -L 28789:127.0.0.1:18789 user@your-vps`
 - Headless creds: set `COWORK_IMPORT_ENV_SETTINGS=1` + `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` (see guide)
 - Docker: `docker compose up --build -d`
 - systemd templates: `deploy/systemd/`
