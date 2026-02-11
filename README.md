@@ -44,8 +44,8 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 
 ### macOS App (Recommended)
 
-- Download DMG (Apple Silicon): [CoWork OS 0.3.28](https://github.com/CoWork-OS/CoWork-OS/releases/download/v0.3.28/CoWork-OS-0.3.28-arm64.dmg)
-- Latest releases: [GitHub Releases](https://github.com/CoWork-OS/CoWork-OS/releases/latest)
+- Download the latest build from [GitHub Releases](https://github.com/CoWork-OS/CoWork-OS/releases/latest)
+- In Assets, download the newest Apple Silicon DMG (`CoWork-OS-<version>-arm64.dmg`)
 - Open the `.dmg` and drag **CoWork OS** into **Applications**
 - Eject the mounted DMG after copying, then launch only **/Applications/CoWork OS.app** (prevents duplicate app instances/icons)
 - This app is currently distributed as an unsigned build. On first launch, use **System Settings > Privacy & Security > Open Anyway** once.
@@ -53,11 +53,11 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 - If the app closes immediately with a `dyld` signature error, run: `codesign --force --deep --sign - "/Applications/CoWork OS.app"`
 - `spctl --add` / `spctl --enable` are deprecated on newer macOS and may show "This operation is no longer supported"
 
-### From Source (Development)
+### From GitHub Source (Development)
 
 #### Prerequisites
 
-- Node.js 18+ and npm
+- Node.js 22+ and npm
 - macOS 12 (Monterey) or later
 - One of: any supported LLM provider credentials (API key/token or AWS credentials) or Ollama installed locally
 - Xcode Command Line Tools (needed to build `better-sqlite3` for Electron): `xcode-select --install`
@@ -67,7 +67,7 @@ Your AI needs a secure home. CoWork OS provides the runtime, security layers, an
 git clone https://github.com/CoWork-OS/CoWork-OS.git
 cd CoWork-OS
 
-# Install dependencies and set up native modules
+# Install dependencies and set up native modules (includes automatic macOS retry handling)
 npm run setup
 
 # Run in development mode
@@ -78,9 +78,13 @@ npm run dev
 
 #### Troubleshooting: macOS "Killed: 9" during setup
 
-If `npm run setup` fails with `Killed: 9`, macOS terminated the native build due to memory pressure.
+If you see `Killed: 9` during `npm run setup`, macOS terminated a native build due to memory pressure.
 
-This repo’s `setup:native` script automatically uses reduced parallelism on macOS and retries with exponential backoff if the OS kills the process. Let it finish retrying; if it still fails, close other apps and run `npm run setup` again.
+`npm run setup` already retries native setup automatically with backoff. Let it continue until it exits. If it still exits non-zero, close heavy apps and run the same command again:
+
+```bash
+npm run setup
+```
 
 #### Build for Production
 

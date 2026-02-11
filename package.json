@@ -1,6 +1,6 @@
 {
   "name": "cowork-os",
-  "version": "0.3.59",
+  "version": "0.3.60",
   "description": "CoWork OS - The operating system for personal AI assistants",
   "overrides": {
     "undici": "^7.0.0"
@@ -70,8 +70,8 @@
     "@pydantic/monty": "^0.0.4",
     "@slack/bolt": "^4.6.0",
     "@types/jszip": "^3.4.1",
-    "@whiskeysockets/baileys": "^6.7.16",
-    "better-sqlite3": "^12.6.2",
+    "@whiskeysockets/baileys": "6.7.16",
+    "better-sqlite3": "12.6.2",
     "botbuilder": "^4.23.3",
     "chokidar": "^5.0.0",
     "discord.js": "^14.25.1",
