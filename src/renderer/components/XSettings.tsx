@@ -116,6 +116,8 @@ export function XSettings() {
         <p className="settings-description">
           Connect the agent to an X account using the Bird CLI. Log in via your browser or provide cookie tokens,
           then use the built-in `x_action` tool for reading and posting.
+          If a request is blocked (rate limit/challenge), the tool now attempts browser fallback automation for read and
+          post/reply/follow steps where possible, with manual fallback details when full automation is not possible.
         </p>
         {status?.error && (
           <p className="settings-hint">Status check: {status.error}</p>
