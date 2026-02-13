@@ -424,6 +424,7 @@ Configure in **Settings** > **Appearance**.
 - **Visual Annotation**: Iterative image refinement with the Visual Annotator — generate, annotate, refine, repeat until approved
 - **Email IMAP Access**: Direct IMAP mailbox access via `email_imap_unread` — check unread emails without needing Google Workspace
 - **Workspace Recency**: Workspaces ordered by last used time for quick access
+- **Hook-Triggered Heartbeat Wakeups**: Agents can act on hook-based wake events as explicit check-in prompts
 
 ### Voice Mode
 
@@ -584,6 +585,10 @@ Full Playwright integration:
 - Click, fill forms, type text, press keys
 - Extract page content, links, and form data
 - Scroll pages, wait for elements, execute JavaScript
+- Browser automation supports `browser_channel`:
+  - `chromium` (default bundled Chromium)
+  - `chrome` (system Google Chrome)
+  - `brave` (system Brave or a path set in `BRAVE_PATH`)
 
 ### System Tools
 
@@ -2244,6 +2249,7 @@ Users must comply with their model provider's terms:
 - [x] Chat commands: `/schedule`, `/digest`, `/followups`, `/brief` across all gateway channels
 - [x] Inbound attachment persistence (channel messages save files to `.cowork/inbox/attachments/`)
 - [x] Cron template variables (`{{today}}`, `{{chat_messages}}`, etc.) and conditional delivery
+- [x] Brave browser channel support via `browser_navigate` (`browser_channel: "chrome" | "chromium" | "brave"`)
 - [x] Image generation via `generate_image` with multi-provider support (Gemini, OpenAI, Azure OpenAI)
 - [x] Visual annotation tools and Agentic Image Loop skill for iterative image refinement
 - [x] Inline image preview in task event timeline
@@ -2256,6 +2262,7 @@ Users must comply with their model provider's terms:
 - [x] Control plane web dashboard, approval API, and channel management API
 - [x] Docker and VPS deployment support (Dockerfiles, docker-compose, systemd units)
 - [x] Dedicated workspaces for scheduled cron jobs (auto-created from temp workspace)
+- [x] Hook wake requests for heartbeat processing, including queueing, coalescing, and immediate scheduling
 
 ### Planned
 
