@@ -8,7 +8,7 @@ import { BrowserService } from '../browser/browser-service';
  */
 export class BrowserTools {
   private browserService: BrowserService;
-  private browserState: { headless: boolean; profile: string | null; browserChannel: 'chromium' | 'chrome' } = {
+  private browserState: { headless: boolean; profile: string | null; browserChannel: 'chromium' | 'chrome' | 'brave' } = {
     headless: true,
     profile: null,
     browserChannel: 'chromium',
@@ -52,7 +52,10 @@ export class BrowserTools {
     const profileRaw = typeof opts.profile === 'string' ? opts.profile.trim() : undefined;
     const requestedProfile = profileRaw !== undefined ? (profileRaw ? profileRaw : null) : undefined;
     const channelRaw = typeof opts.browser_channel === 'string' ? opts.browser_channel.trim().toLowerCase() : '';
-    const requestedChannel = channelRaw === 'chrome' || channelRaw === 'chromium' ? channelRaw : undefined;
+    const requestedChannel =
+      channelRaw === 'chrome' || channelRaw === 'chromium' || channelRaw === 'brave'
+        ? channelRaw
+        : undefined;
 
     const nextHeadless = requestedHeadless ?? this.browserState.headless;
     const nextProfile = requestedProfile ?? this.browserState.profile;
@@ -87,7 +90,7 @@ export class BrowserTools {
           'Navigate the browser to a URL. Opens the browser if not already open. ' +
           'Optional: set headless=false to open a visible browser window. ' +
           'Optional: set profile to enable a persistent browser profile (cookies/storage persist across tasks). ' +
-          'Optional: set browser_channel="chrome" to use system Google Chrome (otherwise uses bundled Chromium). ' +
+          'Optional: set browser_channel to "chrome" (system Google Chrome) or "brave" (system Brave); default is bundled Chromium. ' +
           'NOTE: For RESEARCH tasks (finding news, trends, discussions), use web_search instead - it aggregates results from multiple sources. ' +
           'For simply reading a specific URL, use web_fetch - it is faster and lighter. ' +
           'Use browser_navigate ONLY when you need to interact with the page (click, fill forms, take screenshots) or when the page requires JavaScript rendering.',
@@ -114,8 +117,8 @@ export class BrowserTools {
             },
             browser_channel: {
               type: 'string',
-              enum: ['chromium', 'chrome'],
-              description: 'Which browser binary to use (default: chromium). "chrome" requires Google Chrome installed.'
+              enum: ['chromium', 'chrome', 'brave'],
+              description: 'Which browser binary to use (default: chromium). "chrome" requires Google Chrome; "brave" requires Brave (or BRAVE_PATH).'
             }
           },
           required: ['url']

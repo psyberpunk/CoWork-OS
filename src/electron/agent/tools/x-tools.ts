@@ -602,9 +602,10 @@ export class XTools {
     return { success: true, result: browserResult.result };
   }
 
-  private async openBrowserFallbackPage(url: string): Promise<{ navResult?: any; browserChannel: 'chromium' | 'chrome'; error?: string }> {
-    const attempts: Array<{ browser_channel?: 'chromium' | 'chrome' }> = [
+  private async openBrowserFallbackPage(url: string): Promise<{ navResult?: any; browserChannel: 'chromium' | 'chrome' | 'brave'; error?: string }> {
+    const attempts: Array<{ browser_channel?: 'chromium' | 'chrome' | 'brave' }> = [
       {},
+      { browser_channel: 'brave' },
       { browser_channel: 'chrome' },
     ];
 
