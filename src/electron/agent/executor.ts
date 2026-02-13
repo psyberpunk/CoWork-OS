@@ -62,13 +62,17 @@ const BACKOFF_MULTIPLIER = 2;   // Double each time
 // These errors should immediately disable the tool
 const NON_RETRYABLE_ERROR_PATTERNS = [
   /quota.*exceeded/i,
+  /exceeds?.*usage.*limit/i,
+  /usage.*limit/i,
   /rate.*limit/i,
   /exceeded.*quota/i,
   /too many requests/i,
   /429/i,
+  /432/i,
   /resource.*exhausted/i,
   /billing/i,
   /payment.*required/i,
+  /upgrade your plan/i,
 ];
 
 // Patterns that indicate input-dependent errors (not tool failures)
@@ -4366,6 +4370,8 @@ WEB RESEARCH & CONTENT EXTRACTION (IMPORTANT):
 - For GENERAL web research (news, trends, discussions, information gathering): USE web_search as the PRIMARY tool.
   web_search is faster, more efficient, and aggregates results from multiple sources.
 - For SPECIFIC URL content (when you have an exact URL to read): USE web_fetch - it's lightweight and fast.
+- If the user already provided an exact URL, do NOT start with web_search unless explicitly asked to find alternatives/sources.
+- For transcript requests from a provided YouTube/video URL, prefer a matching transcription/summarization skill first; avoid research-style browsing loops.
 - For INTERACTIVE tasks (clicking, filling forms, JavaScript-heavy pages): USE browser_navigate + browser_get_content.
 - For SCREENSHOTS: USE browser_navigate + browser_screenshot.
 - NEVER use run_command with curl, wget, or other network commands for web access.
