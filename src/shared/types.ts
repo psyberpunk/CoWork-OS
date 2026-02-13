@@ -2822,6 +2822,7 @@ export type SkillSource = 'bundled' | 'managed' | 'workspace';
 
 // Requirements that must be met for a skill to be eligible
 export interface SkillRequirements {
+  tools?: string[];     // Required tool capabilities from the runtime
   bins?: string[];      // All these binaries must exist
   anyBins?: string[];   // At least one of these binaries must exist
   env?: string[];       // All these environment variables must be set

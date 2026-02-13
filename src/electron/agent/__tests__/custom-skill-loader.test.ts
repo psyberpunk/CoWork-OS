@@ -525,6 +525,44 @@ describe('listModelInvocableSkills', () => {
     expect(invocableSkills).toHaveLength(1);
     expect(invocableSkills[0].id).toBe('no-policy-skill');
   });
+
+  it('should filter out skills requiring unavailable tools', async () => {
+    const shellDependentSkill = createTestSkill({
+      id: 'shell-dependent',
+      requires: { tools: ['run_command'] } as any,
+    });
+    const safeSkill = createTestSkill({ id: 'safe-skill' });
+
+    mockFiles.set('shell-dependent.json', JSON.stringify(shellDependentSkill));
+    mockFiles.set('safe-skill.json', JSON.stringify(safeSkill));
+
+    await loader.reloadSkills();
+    const invocableSkills = loader.listModelInvocableSkills({
+      availableToolNames: new Set(['read_file', 'web_fetch']),
+    });
+
+    expect(invocableSkills).toHaveLength(1);
+    expect(invocableSkills[0].id).toBe('safe-skill');
+  });
+
+  it('should filter out binary-dependent skills when run_command is unavailable', async () => {
+    const binarySkill = createTestSkill({
+      id: 'binary-skill',
+      requires: { bins: ['summarize'] },
+    });
+    const safeSkill = createTestSkill({ id: 'safe-skill' });
+
+    mockFiles.set('binary-skill.json', JSON.stringify(binarySkill));
+    mockFiles.set('safe-skill.json', JSON.stringify(safeSkill));
+
+    await loader.reloadSkills();
+    const invocableSkills = loader.listModelInvocableSkills({
+      availableToolNames: new Set(['read_file', 'web_fetch']),
+    });
+
+    expect(invocableSkills).toHaveLength(1);
+    expect(invocableSkills[0].id).toBe('safe-skill');
+  });
 });
 
 describe('getSkillDescriptionsForModel', () => {

@@ -492,6 +492,7 @@ interface SkillParameter {
 type SkillSource = 'bundled' | 'managed' | 'workspace';
 
 interface SkillRequirements {
+  tools?: string[];
   bins?: string[];
   anyBins?: string[];
   env?: string[];

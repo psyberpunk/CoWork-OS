@@ -895,7 +895,8 @@ Channel Message Log (Local Gateway):
 
     // Add custom skills available for use_skill
     const skillLoader = getCustomSkillLoader();
-    const skillDescriptions = skillLoader.getSkillDescriptionsForModel();
+    const availableToolNames = new Set(this.getTools().map((tool) => tool.name));
+    const skillDescriptions = skillLoader.getSkillDescriptionsForModel({ availableToolNames });
     if (skillDescriptions) {
       descriptions += `
 
@@ -1485,6 +1486,33 @@ ${skillDescriptions}`;
           suggestion: 'Install required binaries/tools, set required environment variables, or switch OS context, then retry.',
         };
       }
+    }
+
+    // Enforce tool-level requirements at invocation time.
+    // This prevents selecting CLI-oriented skills when run_command/shell access is unavailable.
+    const toolNames = new Set(this.getTools().map((tool) => tool.name));
+    const requiredToolsFromSkill = Array.isArray((skill.requires as any)?.tools)
+      ? ((skill.requires as any).tools as unknown[])
+          .filter((tool): tool is string => typeof tool === 'string' && tool.trim().length > 0)
+      : [];
+    const inferredRequiredTools: string[] = [];
+    const hasBinaryRequirements =
+      (Array.isArray(skill.requires?.bins) && skill.requires.bins.length > 0) ||
+      (Array.isArray(skill.requires?.anyBins) && skill.requires.anyBins.length > 0);
+    if (hasBinaryRequirements) {
+      inferredRequiredTools.push('run_command');
+    }
+
+    const requiredTools = Array.from(new Set([...requiredToolsFromSkill, ...inferredRequiredTools]));
+    const missingTools = requiredTools.filter((tool) => !toolNames.has(tool));
+    if (missingTools.length > 0) {
+      return {
+        success: false,
+        error: `Skill '${skill_id}' is not currently executable`,
+        reason: `Missing required tools: ${missingTools.join(', ')}`,
+        missing_tools: missingTools,
+        suggestion: 'Enable the missing tools/integrations in this workspace context or use a different skill.',
+      };
     }
 
     // Check for required parameters

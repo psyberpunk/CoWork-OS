@@ -50,6 +50,7 @@ vi.mock('../../custom-skill-loader', () => ({
   getCustomSkillLoader: vi.fn().mockImplementation(() => ({
     getSkill: vi.fn().mockImplementation((id: string) => mockSkills.get(id)),
     listModelInvocableSkills: vi.fn().mockImplementation(() => Array.from(mockSkills.values())),
+    getSkillStatusEntry: vi.fn().mockResolvedValue(null),
     expandPrompt: vi.fn().mockImplementation((skill: CustomSkill, params: Record<string, any>) => {
       let prompt = skill.prompt;
       if (skill.parameters) {
@@ -393,6 +394,24 @@ describe('use_skill tool', () => {
 
       expect(result.skill_name).toBe('Metadata Test Skill');
       expect(result.skill_description).toBe('A skill with metadata');
+    });
+
+    it('should reject skill when required tool is unavailable', async () => {
+      const skill = createTestSkill({
+        id: 'cli-skill',
+        requires: { tools: ['run_command'] } as any,
+      });
+      mockSkills.set('cli-skill', skill);
+
+      const result = await registry.executeTool('use_skill', {
+        skill_id: 'cli-skill',
+        parameters: { param1: 'test' },
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not currently executable');
+      expect(result.reason).toContain('run_command');
+      expect(result.missing_tools).toContain('run_command');
     });
   });
 

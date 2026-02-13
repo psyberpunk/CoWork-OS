@@ -342,7 +342,8 @@ export class CustomSkillLoader {
    * List skills that can be automatically invoked by the model
    * Excludes guidelines and skills with disableModelInvocation set
    */
-  listModelInvocableSkills(): CustomSkill[] {
+  listModelInvocableSkills(options: { availableToolNames?: Set<string> } = {}): CustomSkill[] {
+    const availableToolNames = options.availableToolNames;
     return this.listSkills().filter((skill) => {
       // Exclude guideline skills
       if (skill.type === 'guideline') return false;
@@ -350,6 +351,27 @@ export class CustomSkillLoader {
       if (skill.enabled === false) return false;
       // Exclude skills that explicitly disable model invocation
       if (skill.invocation?.disableModelInvocation === true) return false;
+
+      // If tool availability is provided, filter out skills that cannot run in this context.
+      if (availableToolNames) {
+        const skillRequires = (skill.requires || {}) as any;
+        const requiredTools: string[] = Array.isArray(skillRequires.tools)
+          ? skillRequires.tools.filter((tool: unknown): tool is string => typeof tool === 'string' && tool.trim().length > 0)
+          : [];
+
+        if (requiredTools.some((tool) => !availableToolNames.has(tool))) {
+          return false;
+        }
+
+        // Skills requiring external binaries generally need run_command access.
+        const hasBinaryRequirements =
+          (Array.isArray(skill.requires?.bins) && skill.requires.bins.length > 0) ||
+          (Array.isArray(skill.requires?.anyBins) && skill.requires.anyBins.length > 0);
+        if (hasBinaryRequirements && !availableToolNames.has('run_command')) {
+          return false;
+        }
+      }
+
       return true;
     });
   }
@@ -358,8 +380,8 @@ export class CustomSkillLoader {
    * Get formatted skill descriptions for the model's system prompt
    * Groups skills by category and includes parameter info
    */
-  getSkillDescriptionsForModel(): string {
-    const skills = this.listModelInvocableSkills();
+  getSkillDescriptionsForModel(options: { availableToolNames?: Set<string> } = {}): string {
+    const skills = this.listModelInvocableSkills(options);
     if (skills.length === 0) {
       return '';
     }
