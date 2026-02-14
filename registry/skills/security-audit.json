@@ -1,0 +1,26 @@
+{
+  "id": "security-audit",
+  "name": "Security Audit",
+  "description": "Check code for common security vulnerabilities",
+  "icon": "🔒",
+  "category": "Development",
+  "prompt": "Please perform a security audit on {{path}}.\n\nCheck for:\n- SQL injection vulnerabilities\n- XSS (Cross-Site Scripting) risks\n- Command injection possibilities\n- Insecure data handling\n- Hardcoded secrets or credentials\n- Insecure dependencies\n- Authentication/authorization issues\n- Input validation problems\n- Sensitive data exposure\n\nFor each issue found:\n1. Describe the vulnerability\n2. Explain the potential impact\n3. Provide a fix with code example\n4. Rate severity (Critical/High/Medium/Low)",
+  "parameters": [
+    {
+      "name": "path",
+      "type": "string",
+      "description": "Path to file or folder to audit",
+      "required": true,
+      "default": "."
+    }
+  ],
+  "enabled": true,
+  "metadata": {
+    "routing": {
+      "useWhen": "Use when the user asks to check code for common security vulnerabilities.",
+      "dontUseWhen": "Do not use when the request is asking for planning documents, high-level strategy, or non-executable discussion; use the relevant planning or design workflow instead.",
+      "outputs": "Outcome from Security Audit: task-specific result plus concrete action notes.",
+      "successCriteria": "Returns concrete actions and decisions matching the requested task, with no fabricated tool-side behavior."
+    }
+  }
+}
