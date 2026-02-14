@@ -1850,6 +1850,20 @@ export class AgentDaemon extends EventEmitter {
   }
 
   /**
+   * Update workspace permissions and return the refreshed workspace.
+   */
+  updateWorkspacePermissions(workspaceId: string, patch: Partial<WorkspacePermissions>): Workspace | undefined {
+    const workspace = this.workspaceRepo.findById(workspaceId);
+    if (!workspace) return undefined;
+    const updatedPermissions: WorkspacePermissions = {
+      ...workspace.permissions,
+      ...patch,
+    };
+    this.workspaceRepo.updatePermissions(workspaceId, updatedPermissions);
+    return this.workspaceRepo.findById(workspaceId);
+  }
+
+  /**
    * Get the most recently used non-temporary workspace, if any.
    */
   getMostRecentNonTempWorkspace(): Workspace | undefined {

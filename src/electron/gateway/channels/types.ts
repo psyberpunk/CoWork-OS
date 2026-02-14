@@ -141,6 +141,12 @@ export interface MessageAttachment {
 export interface ChannelConfig {
   /** Whether this channel is enabled */
   enabled: boolean;
+  /** Default agent role ID for tasks created from this channel */
+  defaultAgentRoleId?: string;
+  /** Default workspace ID for this channel (overrides router default) */
+  defaultWorkspaceId?: string;
+  /** Allowed agent role IDs (empty = all allowed) */
+  allowedAgentRoleIds?: string[];
   /** Channel-specific settings */
   [key: string]: unknown;
 }

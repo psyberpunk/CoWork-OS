@@ -3,12 +3,34 @@ import { existsSync } from 'fs';
 import { Workspace, CommandTerminationReason } from '../../../shared/types';
 import { AgentDaemon } from '../daemon';
 import { GuardrailManager } from '../../guardrails/guardrail-manager';
-import { BuiltinToolsSettingsManager } from './builtin-settings';
+import { BuiltinToolsSettingsManager, type RunCommandApprovalMode } from './builtin-settings';
 
 // Limits to prevent runaway commands
 const MAX_TIMEOUT = 5 * 60 * 1000; // 5 minutes max
 const DEFAULT_TIMEOUT = 60 * 1000; // 1 minute default
 const MAX_OUTPUT_SIZE = 100 * 1024; // 100KB max output
+
+const SHELL_OUTPUT_REDACTION_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
+  {
+    // Solana and similar wallets often print a recovery phrase in this exact format.
+    pattern: /(Save this seed phrase to recover your new keypair:\s*\n)([a-z]+(?:\s+[a-z]+){11,23})(\s*\n?)/gi,
+    replacement: '$1[REDACTED_SEED_PHRASE]$3',
+  },
+  {
+    // Generic "seed phrase:" / "mnemonic:" style output.
+    pattern: /((?:seed phrase|recovery phrase|mnemonic)[^:\n]{0,40}:\s*\n?)([a-z]+(?:\s+[a-z]+){11,23})(\s*\n?)/gi,
+    replacement: '$1[REDACTED_SEED_PHRASE]$3',
+  },
+  {
+    pattern: /-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z]+)? PRIVATE KEY-----/g,
+    replacement: '[REDACTED_PRIVATE_KEY]',
+  },
+  {
+    // Common JSON-secret-key shape (e.g., Solana id.json).
+    pattern: /\[(?:\s*\d{1,3}\s*,){31,}\s*\d{1,3}\s*\]/g,
+    replacement: '[REDACTED_SECRET_KEY_ARRAY]',
+  },
+];
 
 /**
  * Validate that a PID is a safe positive integer
@@ -166,6 +188,8 @@ function killProcessTree(pid: number, signal: NodeJS.Signals): void {
 export class ShellTools {
   private readonly recentApprovals = new Map<string, { approvedAt: number; count: number }>();
   private readonly approvalWindowMs = 2 * 60 * 1000;
+  private readonly bundleApprovalWindowMs = 10 * 60 * 1000;
+  private bundleApproval: { approvedAt: number; count: number } | null = null;
   // Track the currently running child process for stdin support
   private activeProcess: ChildProcess | null = null;
   // Track escalation timeouts so we can cancel them when process exits
@@ -391,9 +415,21 @@ export class ShellTools {
     // Check if command is trusted (auto-approve without user confirmation)
     const trustCheck = GuardrailManager.isCommandTrusted(command);
     const autoApproveEnabled = BuiltinToolsSettingsManager.getToolAutoApprove('run_command');
+    const approvalMode: RunCommandApprovalMode = BuiltinToolsSettingsManager.getRunCommandApprovalMode();
+    const safeForAutoApproval = this.isAutoApprovalSafe(command);
+    const bundleEligible = approvalMode === 'single_bundle' && safeForAutoApproval;
     let approved = false;
+    const signature = this.getCommandSignature(command);
+    const now = Date.now();
 
-    if (autoApproveEnabled && this.isAutoApprovalSafe(command)) {
+    if (bundleEligible && this.isBundleApprovalActive(now)) {
+      approved = true;
+      this.recordBundleApproval(now);
+      this.daemon.logEvent(this.taskId, 'log', {
+        message: `Auto-approved command via single bundle (${this.bundleApproval?.count || 1} approved in current bundle)`,
+        command,
+      });
+    } else if (autoApproveEnabled && safeForAutoApproval) {
       approved = true;
       this.daemon.logEvent(this.taskId, 'log', {
         message: 'Auto-approved command (user setting enabled)',
@@ -407,15 +443,13 @@ export class ShellTools {
         command,
       });
     } else {
-      const signature = this.getCommandSignature(command);
       const previousApproval = signature ? this.recentApprovals.get(signature) : undefined;
-      const now = Date.now();
 
       if (
         signature &&
         previousApproval &&
         now - previousApproval.approvedAt <= this.approvalWindowMs &&
-        this.isAutoApprovalSafe(command)
+        safeForAutoApproval
       ) {
         approved = true;
         previousApproval.count += 1;
@@ -430,16 +464,27 @@ export class ShellTools {
         approved = await this.daemon.requestApproval(
           this.taskId,
           'run_command',
-          `Run command: ${command}`,
+          bundleEligible
+            ? `Run command (single approval bundle for this task): ${command}`
+            : `Run command: ${command}`,
           {
             command,
             cwd: options?.cwd || this.workspace.path,
             timeout: options?.timeout || DEFAULT_TIMEOUT,
+            approvalMode,
+            bundleScope: bundleEligible ? 'safe_commands_in_this_task' : undefined,
           }
         );
 
         if (approved && signature) {
           this.recentApprovals.set(signature, { approvedAt: now, count: 1 });
+        }
+        if (approved && bundleEligible) {
+          this.recordBundleApproval(now);
+          this.daemon.logEvent(this.taskId, 'log', {
+            message: 'Single approval bundle activated for safe shell commands in this task',
+            command,
+          });
         }
       }
     }
@@ -515,7 +560,7 @@ export class ShellTools {
 
       // Stream stdout
       child.stdout.on('data', (data: Buffer) => {
-        const chunk = data.toString('utf-8');
+        const chunk = this.sanitizeCommandOutput(data.toString('utf-8'));
         stdout += chunk;
         // Emit live output
         this.daemon.logEvent(this.taskId, 'command_output', {
@@ -527,7 +572,7 @@ export class ShellTools {
 
       // Stream stderr
       child.stderr.on('data', (data: Buffer) => {
-        const chunk = data.toString('utf-8');
+        const chunk = this.sanitizeCommandOutput(data.toString('utf-8'));
         stderr += chunk;
         // Emit live output
         this.daemon.logEvent(this.taskId, 'command_output', {
@@ -585,8 +630,8 @@ export class ShellTools {
 
         resolve({
           success,
-          stdout: truncatedStdout,
-          stderr: truncatedStderr,
+          stdout: this.sanitizeCommandOutput(truncatedStdout),
+          stderr: this.sanitizeCommandOutput(truncatedStderr),
           exitCode: code,
           truncated: stdout.length > MAX_OUTPUT_SIZE || stderr.length > MAX_OUTPUT_SIZE,
           terminationReason,
@@ -619,8 +664,8 @@ export class ShellTools {
 
         resolve({
           success: false,
-          stdout: this.truncateOutput(stdout),
-          stderr: error.message,
+          stdout: this.sanitizeCommandOutput(this.truncateOutput(stdout)),
+          stderr: this.sanitizeCommandOutput(error.message),
           exitCode: null,
           terminationReason,
         });
@@ -638,6 +683,8 @@ export class ShellTools {
     signature = signature.replace(/"(?:[^"\\]|\\.)*"/g, '"<arg>"');
     signature = signature.replace(/'(?:[^'\\]|\\.)*'/g, "'<arg>'");
     signature = signature.replace(/(?:\/Users\/[^\s]+|~\/[^\s]+|\/[^\s]+)/g, '<path>');
+    signature = signature.replace(/\b\d+(?:\.\d+)?\b/g, '<num>');
+    signature = signature.replace(/\b[A-Za-z0-9_-]{20,}\b/g, '<id>');
     return signature;
   }
 
@@ -646,6 +693,28 @@ export class ShellTools {
    */
   private isAutoApprovalSafe(command: string): boolean {
     return !/(^|\s)(sudo|rm|dd|mkfs|diskutil|shutdown|reboot|killall)\b/i.test(command);
+  }
+
+  /**
+   * Whether an approval bundle is still active for this task.
+   */
+  private isBundleApprovalActive(now: number): boolean {
+    return Boolean(
+      this.bundleApproval &&
+      now - this.bundleApproval.approvedAt <= this.bundleApprovalWindowMs
+    );
+  }
+
+  /**
+   * Refresh bundle approval bookkeeping.
+   */
+  private recordBundleApproval(now: number): void {
+    if (this.bundleApproval && now - this.bundleApproval.approvedAt <= this.bundleApprovalWindowMs) {
+      this.bundleApproval.approvedAt = now;
+      this.bundleApproval.count += 1;
+      return;
+    }
+    this.bundleApproval = { approvedAt: now, count: 1 };
   }
 
   /**
@@ -659,6 +728,18 @@ export class ShellTools {
       output.slice(0, MAX_OUTPUT_SIZE) +
       `\n\n[... Output truncated. Showing first ${Math.round(MAX_OUTPUT_SIZE / 1024)}KB ...]`
     );
+  }
+
+  /**
+   * Redact sensitive output before it reaches task logs or model context.
+   */
+  private sanitizeCommandOutput(output: string): string {
+    if (!output) return '';
+    let sanitized = output;
+    for (const { pattern, replacement } of SHELL_OUTPUT_REDACTION_PATTERNS) {
+      sanitized = sanitized.replace(pattern, replacement);
+    }
+    return sanitized;
   }
 }
 

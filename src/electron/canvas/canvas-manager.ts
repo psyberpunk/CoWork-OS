@@ -15,7 +15,7 @@
 import type { BrowserWindow } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { existsSync, readdirSync } from 'fs';
+import { existsSync, readdirSync, statSync } from 'fs';
 import { randomUUID } from 'crypto';
 import chokidar, { type FSWatcher } from 'chokidar';
 import type {
@@ -24,6 +24,7 @@ import type {
   CanvasEvent,
   CanvasA2UIAction,
   CanvasSnapshot,
+  CanvasCheckpoint,
 } from '../../shared/types';
 import { loadCanvasStore, saveCanvasStore } from './canvas-store';
 import { getUserDataDir } from '../utils/user-data-dir';
@@ -117,9 +118,15 @@ export class CanvasManager {
   private windows: Map<string, BrowserWindow> = new Map();
   private watchers: Map<string, FSWatcher> = new Map();
   private windowToSession: Map<number, string> = new Map();
+  private checkpoints: Map<string, CanvasCheckpoint[]> = new Map();
   private mainWindow: BrowserWindow | null = null;
   private eventCallback: ((event: CanvasEvent) => void) | null = null;
   private a2uiCallback: ((action: CanvasA2UIAction) => void) | null = null;
+
+  /** Maximum checkpoints per session */
+  private maxCheckpointsPerSession = 50;
+  /** Maximum individual file size to include in a checkpoint (5 MB) */
+  private static readonly MAX_CHECKPOINT_FILE_BYTES = 5 * 1024 * 1024;
 
   private constructor() {}
 
@@ -847,6 +854,204 @@ export class CanvasManager {
     }
   }
 
+  // ===== Checkpoint / State History =====
+
+  /**
+   * Save a checkpoint of the current canvas file state.
+   * Reads all files from the session directory and stores them in-memory.
+   */
+  async saveCheckpoint(sessionId: string, label?: string): Promise<CanvasCheckpoint> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Canvas session not found: ${sessionId}`);
+    }
+
+    if (!existsSync(session.sessionDir)) {
+      throw new Error('Canvas session directory not found');
+    }
+
+    // Read all files from the session directory (with size limits)
+    const fileNames = readdirSync(session.sessionDir);
+    const files: Record<string, string> = {};
+    const skipped: string[] = [];
+    for (const fileName of fileNames) {
+      const filePath = path.join(session.sessionDir, fileName);
+      try {
+        const stat = statSync(filePath);
+        if (!stat.isFile()) {
+          skipped.push(`${fileName} (not a file)`);
+          continue;
+        }
+        if (stat.size > CanvasManager.MAX_CHECKPOINT_FILE_BYTES) {
+          skipped.push(`${fileName} (${(stat.size / 1024 / 1024).toFixed(1)} MB exceeds limit)`);
+          continue;
+        }
+        files[fileName] = await fs.readFile(filePath, 'utf-8');
+      } catch {
+        skipped.push(`${fileName} (read error)`);
+      }
+    }
+    if (skipped.length > 0) {
+      console.warn(`[CanvasManager] Checkpoint skipped files: ${skipped.join(', ')}`);
+    }
+
+    const checkpoint: CanvasCheckpoint = {
+      id: randomUUID(),
+      sessionId,
+      label: label || `Checkpoint ${new Date().toLocaleTimeString()}`,
+      files,
+      createdAt: Date.now(),
+    };
+
+    // Store checkpoint
+    let sessionCheckpoints = this.checkpoints.get(sessionId);
+    if (!sessionCheckpoints) {
+      sessionCheckpoints = [];
+      this.checkpoints.set(sessionId, sessionCheckpoints);
+    }
+    sessionCheckpoints.push(checkpoint);
+
+    // Evict oldest if over limit
+    while (sessionCheckpoints.length > this.maxCheckpointsPerSession) {
+      sessionCheckpoints.shift();
+    }
+
+    // Emit event
+    this.emitEvent({
+      type: 'checkpoint_saved',
+      sessionId,
+      taskId: session.taskId,
+      timestamp: Date.now(),
+      checkpoint: { id: checkpoint.id, label: checkpoint.label },
+    });
+
+    console.log(`[CanvasManager] Saved checkpoint "${checkpoint.label}" for session ${sessionId} (${Object.keys(files).length} files)`);
+    return checkpoint;
+  }
+
+  /**
+   * Restore a canvas session to a previously saved checkpoint.
+   * Writes all checkpoint files back to the session directory and reloads.
+   */
+  async restoreCheckpoint(sessionId: string, checkpointId: string): Promise<CanvasCheckpoint> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Canvas session not found: ${sessionId}`);
+    }
+
+    const sessionCheckpoints = this.checkpoints.get(sessionId);
+    if (!sessionCheckpoints) {
+      throw new Error('No checkpoints found for this session');
+    }
+
+    const checkpoint = sessionCheckpoints.find((cp) => cp.id === checkpointId);
+    if (!checkpoint) {
+      throw new Error(`Checkpoint not found: ${checkpointId}`);
+    }
+
+    // Verify session directory still exists before restoring
+    if (!existsSync(session.sessionDir)) {
+      throw new Error(`Cannot restore: session directory was deleted: ${session.sessionDir}`);
+    }
+
+    // Write all checkpoint files back to the session directory
+    for (const [fileName, content] of Object.entries(checkpoint.files)) {
+      const safeFilename = path.basename(fileName);
+      const filePath = path.join(session.sessionDir, safeFilename);
+      await fs.writeFile(filePath, content, 'utf-8');
+    }
+
+    // Update session timestamp
+    session.lastUpdatedAt = Date.now();
+    session.mode = 'html';
+    session.url = undefined;
+
+    // Reload the canvas window if it exists
+    const window = this.windows.get(sessionId);
+    if (window && !window.isDestroyed()) {
+      await window.loadURL(this.getCanvasUrl(sessionId));
+    }
+
+    // Persist sessions
+    this.persistSessions().catch((err) =>
+      console.error('[CanvasManager] Failed to persist after restore:', err)
+    );
+
+    // Emit event
+    this.emitEvent({
+      type: 'checkpoint_restored',
+      sessionId,
+      taskId: session.taskId,
+      timestamp: Date.now(),
+      checkpoint: { id: checkpoint.id, label: checkpoint.label },
+    });
+
+    this.emitEvent({
+      type: 'session_updated',
+      sessionId,
+      taskId: session.taskId,
+      timestamp: Date.now(),
+      session,
+    });
+
+    console.log(`[CanvasManager] Restored checkpoint "${checkpoint.label}" for session ${sessionId}`);
+    return checkpoint;
+  }
+
+  /**
+   * List checkpoints for a session
+   */
+  listCheckpoints(sessionId: string): CanvasCheckpoint[] {
+    return (this.checkpoints.get(sessionId) || []).map((cp) => ({
+      ...cp,
+      files: {}, // Don't return file contents in list — only metadata
+    }));
+  }
+
+  /**
+   * Delete a specific checkpoint
+   */
+  deleteCheckpoint(sessionId: string, checkpointId: string): boolean {
+    const sessionCheckpoints = this.checkpoints.get(sessionId);
+    if (!sessionCheckpoints) return false;
+
+    const idx = sessionCheckpoints.findIndex((cp) => cp.id === checkpointId);
+    if (idx === -1) return false;
+
+    sessionCheckpoints.splice(idx, 1);
+    return true;
+  }
+
+  // ===== Cross-device Canvas Access =====
+
+  /**
+   * Get the current HTML content of a canvas session (for remote rendering).
+   * Returns the contents of all files in the session directory.
+   */
+  async getSessionContent(sessionId: string): Promise<Record<string, string>> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error(`Canvas session not found: ${sessionId}`);
+    }
+
+    if (!existsSync(session.sessionDir)) {
+      throw new Error('Canvas session directory not found');
+    }
+
+    const fileNames = readdirSync(session.sessionDir);
+    const files: Record<string, string> = {};
+    for (const fileName of fileNames) {
+      const filePath = path.join(session.sessionDir, fileName);
+      try {
+        files[fileName] = await fs.readFile(filePath, 'utf-8');
+      } catch {
+        // Skip unreadable files
+      }
+    }
+
+    return files;
+  }
+
   /**
    * Cleanup all sessions and resources
    */
@@ -862,6 +1067,7 @@ export class CanvasManager {
     this.sessions.clear();
     this.windows.clear();
     this.windowToSession.clear();
+    this.checkpoints.clear();
 
     console.log('[CanvasManager] Cleanup complete');
   }

@@ -499,7 +499,7 @@ describe('TaskExecutor executeStep failure handling', () => {
 
     expect(step.status).toBe('failed');
     expect((executorWithTools as any).callLLMWithRetry).toHaveBeenCalledTimes(1);
-    expect(step.error).toContain('All required tools are unavailable or failed');
+    expect(step.error).toMatch(/not currently executable|All required tools are unavailable or failed/);
   });
 
   it('normalizes namespaced tool names like functions.web_search', async () => {

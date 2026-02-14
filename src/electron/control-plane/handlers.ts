@@ -29,6 +29,8 @@ import { ApprovalRepository, TaskEventRepository, TaskRepository, WorkspaceRepos
 import { SearchProviderFactory } from '../agent/search';
 import { configureLlmFromControlPlaneParams, getControlPlaneLlmStatus } from './llm-configure';
 import { checkTailscaleAvailability, getExposureStatus } from '../tailscale';
+import { registerACPMethods, shutdownACP, type ACPHandlerDeps } from '../acp';
+import { AgentRoleRepository } from '../agents/AgentRoleRepository';
 import { TailscaleSettingsManager } from '../tailscale/settings';
 import {
   RemoteGatewayClient,
@@ -44,6 +46,7 @@ import {
 } from './ssh-tunnel';
 import { getEnvSettingsImportModeFromArgsOrEnv, isHeadlessMode, shouldImportEnvSettingsFromArgsOrEnv } from '../utils/runtime-mode';
 import { getUserDataDir } from '../utils/user-data-dir';
+import { CanvasManager } from '../canvas/canvas-manager';
 
 // Server instance
 let controlPlaneServer: ControlPlaneServer | null = null;
@@ -559,10 +562,12 @@ export async function startControlPlaneFromSettings(options: {
     try {
       if (controlPlaneDeps) {
         registerTaskAndWorkspaceMethods(server, controlPlaneDeps);
+          registerACPMethodsOnServer(server, controlPlaneDeps);
         detachAgentDaemonBridge = attachAgentDaemonTaskBridge(server, controlPlaneDeps.agentDaemon);
       } else {
         console.warn('[ControlPlane] No deps provided; task/workspace methods are disabled');
       }
+      registerCanvasMethods(server);
 
       const tailscaleResult = await server.startWithTailscale();
       const address = server.getAddress();
@@ -591,6 +596,224 @@ export async function startControlPlaneFromSettings(options: {
     console.error('[ControlPlane] Auto-start error:', error);
     return { ok: false, error: error?.message || String(error) };
   }
+}
+
+/**
+ * Register ACP (Agent Client Protocol) methods on the server.
+ * Bridges local AgentRoles and external agents into the ACP discovery and messaging system.
+ */
+function registerACPMethodsOnServer(server: ControlPlaneServer, deps: ControlPlaneMethodDeps): void {
+  const db = deps.dbManager.getDatabase();
+  const roleRepo = new AgentRoleRepository(db);
+  const taskRepo = new TaskRepository(db);
+
+  const acpDeps: ACPHandlerDeps = {
+    getActiveRoles: () => roleRepo.findActive(),
+    createTask: async (params) => {
+      // Find a workspace — use the provided one or fall back to the first available
+      let workspaceId = params.workspaceId;
+      if (!workspaceId) {
+        const workspaceRepo = new WorkspaceRepository(db);
+        const workspaces = workspaceRepo.findAll().filter((w: any) => !w.isTemp);
+        if (workspaces.length > 0) {
+          workspaceId = workspaces[0].id;
+        } else {
+          throw new Error('No workspace available for ACP task delegation');
+        }
+      }
+      const task = taskRepo.create({
+        title: params.title,
+        prompt: params.prompt,
+        status: 'pending',
+        workspaceId,
+        assignedAgentRoleId: params.assignedAgentRoleId,
+      } as any);
+      await deps.agentDaemon.startTask(task);
+      return { taskId: task.id };
+    },
+    getTask: (taskId) => {
+      const task = taskRepo.findById(taskId);
+      if (!task) return undefined;
+      return { id: task.id, status: task.status, error: (task as any).error };
+    },
+    cancelTask: async (taskId) => {
+      await deps.agentDaemon.cancelTask(taskId);
+    },
+  };
+
+  registerACPMethods(server, acpDeps);
+}
+
+/**
+ * Register Canvas methods on the Control Plane server.
+ * Enables cross-device canvas rendering: remote clients can list sessions,
+ * fetch content, push content, take snapshots, and manage checkpoints.
+ */
+function registerCanvasMethods(server: ControlPlaneServer): void {
+  let manager: CanvasManager;
+  try {
+    manager = CanvasManager.getInstance();
+  } catch {
+    console.log('[ControlPlane] Canvas not available (headless mode) — skipping canvas methods');
+    return;
+  }
+
+  const requireAuth = (client: any) => {
+    if (!client.isAuthenticated) {
+      throw { code: ErrorCodes.UNAUTHORIZED, message: 'Authentication required' };
+    }
+  };
+
+  const requireString = (value: unknown, field: string): string => {
+    if (typeof value !== 'string' || !value.trim()) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: `${field} is required` };
+    }
+    return value.trim();
+  };
+
+  // canvas.list — list all active canvas sessions
+  server.registerMethod(Methods.CANVAS_LIST, async (client, params) => {
+    requireAuth(client);
+    const p = (params || {}) as { taskId?: string };
+    let sessions = manager.listAllSessions();
+    if (p.taskId) {
+      sessions = sessions.filter((s) => s.taskId === p.taskId);
+    }
+    return {
+      sessions: sessions.map((s) => ({
+        id: s.id,
+        taskId: s.taskId,
+        title: s.title,
+        mode: s.mode,
+        status: s.status,
+        createdAt: s.createdAt,
+        lastUpdatedAt: s.lastUpdatedAt,
+      })),
+    };
+  });
+
+  // canvas.get — get session details
+  server.registerMethod(Methods.CANVAS_GET, async (client, params) => {
+    requireAuth(client);
+    const p = params as { sessionId?: string } | undefined;
+    const sessionId = requireString(p?.sessionId, 'sessionId');
+    const session = manager.getSession(sessionId);
+    if (!session) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: `Canvas session not found: ${sessionId}` };
+    }
+    return {
+      session: {
+        id: session.id,
+        taskId: session.taskId,
+        title: session.title,
+        mode: session.mode,
+        url: session.url,
+        status: session.status,
+        createdAt: session.createdAt,
+        lastUpdatedAt: session.lastUpdatedAt,
+      },
+    };
+  });
+
+  // canvas.snapshot — take a screenshot of a canvas session
+  server.registerMethod(Methods.CANVAS_SNAPSHOT, async (client, params) => {
+    requireAuth(client);
+    const p = params as { sessionId?: string } | undefined;
+    const sessionId = requireString(p?.sessionId, 'sessionId');
+    const snapshot = await manager.takeSnapshot(sessionId);
+    return { snapshot };
+  });
+
+  // canvas.content — get the HTML/CSS/JS files of a canvas session
+  server.registerMethod(Methods.CANVAS_CONTENT, async (client, params) => {
+    requireAuth(client);
+    const p = params as { sessionId?: string } | undefined;
+    const sessionId = requireString(p?.sessionId, 'sessionId');
+    const files = await manager.getSessionContent(sessionId);
+    return { files };
+  });
+
+  // canvas.push — push content to a canvas session
+  server.registerMethod(Methods.CANVAS_PUSH, async (client, params) => {
+    requireAuth(client);
+    const p = (params || {}) as { sessionId?: string; content?: string; filename?: string };
+    const sessionId = requireString(p.sessionId, 'sessionId');
+    const content = requireString(p.content, 'content');
+    await manager.pushContent(sessionId, content, p.filename || 'index.html');
+    server.broadcast(Events.CANVAS_CONTENT_PUSHED, { sessionId });
+    return { ok: true };
+  });
+
+  // canvas.eval — execute JavaScript in a canvas session
+  server.registerMethod(Methods.CANVAS_EVAL, async (client, params) => {
+    requireAuth(client);
+    const p = (params || {}) as { sessionId?: string; script?: string };
+    const sessionId = requireString(p.sessionId, 'sessionId');
+    const script = requireString(p.script, 'script');
+    const result = await manager.evalScript(sessionId, script);
+    return { result };
+  });
+
+  // canvas.checkpoint.save — save a named checkpoint
+  server.registerMethod(Methods.CANVAS_CHECKPOINT_SAVE, async (client, params) => {
+    requireAuth(client);
+    const p = (params || {}) as { sessionId?: string; label?: string };
+    const sessionId = requireString(p.sessionId, 'sessionId');
+    const checkpoint = await manager.saveCheckpoint(sessionId, p.label);
+    return {
+      checkpoint: {
+        id: checkpoint.id,
+        label: checkpoint.label,
+        createdAt: checkpoint.createdAt,
+      },
+    };
+  });
+
+  // canvas.checkpoint.list — list checkpoints for a session
+  server.registerMethod(Methods.CANVAS_CHECKPOINT_LIST, async (client, params) => {
+    requireAuth(client);
+    const p = params as { sessionId?: string } | undefined;
+    const sessionId = requireString(p?.sessionId, 'sessionId');
+    const checkpoints = manager.listCheckpoints(sessionId);
+    return {
+      checkpoints: checkpoints.map((cp) => ({
+        id: cp.id,
+        label: cp.label,
+        createdAt: cp.createdAt,
+      })),
+    };
+  });
+
+  // canvas.checkpoint.restore — restore a session to a checkpoint
+  server.registerMethod(Methods.CANVAS_CHECKPOINT_RESTORE, async (client, params) => {
+    requireAuth(client);
+    const p = (params || {}) as { sessionId?: string; checkpointId?: string };
+    const sessionId = requireString(p.sessionId, 'sessionId');
+    const checkpointId = requireString(p.checkpointId, 'checkpointId');
+    const checkpoint = await manager.restoreCheckpoint(sessionId, checkpointId);
+    return {
+      checkpoint: {
+        id: checkpoint.id,
+        label: checkpoint.label,
+        createdAt: checkpoint.createdAt,
+      },
+    };
+  });
+
+  // canvas.checkpoint.delete — delete a checkpoint
+  server.registerMethod(Methods.CANVAS_CHECKPOINT_DELETE, async (client, params) => {
+    requireAuth(client);
+    const p = (params || {}) as { sessionId?: string; checkpointId?: string };
+    const sessionId = requireString(p.sessionId, 'sessionId');
+    const checkpointId = requireString(p.checkpointId, 'checkpointId');
+    const removed = manager.deleteCheckpoint(sessionId, checkpointId);
+    if (!removed) {
+      throw { code: ErrorCodes.INVALID_PARAMS, message: `Checkpoint not found: ${checkpointId}` };
+    }
+    return { ok: true };
+  });
+
+  console.log('[ControlPlane] Registered 10 canvas methods');
 }
 
 function registerTaskAndWorkspaceMethods(server: ControlPlaneServer, deps: ControlPlaneMethodDeps): void {
@@ -1288,6 +1511,7 @@ export function setupControlPlaneHandlers(mainWindow: BrowserWindow, deps?: Cont
         } else {
           console.warn('[ControlPlane] No deps provided; task/workspace methods are disabled');
         }
+        registerCanvasMethods(server);
 
         // Start with Tailscale if configured
         const tailscaleResult = await server.startWithTailscale();
@@ -1421,8 +1645,10 @@ export function setupControlPlaneHandlers(mainWindow: BrowserWindow, deps?: Cont
 
         if (controlPlaneDeps) {
           registerTaskAndWorkspaceMethods(controlPlaneServer, controlPlaneDeps);
+          registerACPMethodsOnServer(controlPlaneServer, controlPlaneDeps);
           detachAgentDaemonBridge = attachAgentDaemonTaskBridge(controlPlaneServer, controlPlaneDeps.agentDaemon);
         }
+        registerCanvasMethods(controlPlaneServer);
 
         await controlPlaneServer.startWithTailscale();
       }
@@ -1488,6 +1714,7 @@ export function setupControlPlaneHandlers(mainWindow: BrowserWindow, deps?: Cont
             registerTaskAndWorkspaceMethods(controlPlaneServer, controlPlaneDeps);
             detachAgentDaemonBridge = attachAgentDaemonTaskBridge(controlPlaneServer, controlPlaneDeps.agentDaemon);
           }
+          registerCanvasMethods(controlPlaneServer);
 
           await controlPlaneServer.startWithTailscale();
         }
@@ -1898,6 +2125,9 @@ export async function shutdownControlPlane(): Promise<void> {
 
   // Shutdown remote client
   shutdownRemoteGatewayClient();
+
+  // Shutdown ACP registry
+  shutdownACP();
 
   // Shutdown local server
   if (controlPlaneServer) {

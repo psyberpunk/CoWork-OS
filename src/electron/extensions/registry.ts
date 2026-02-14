@@ -96,6 +96,24 @@ export class PluginRegistry extends EventEmitter {
   }
 
   /**
+   * Re-scan extension directories for new plugins that weren't present at startup.
+   * Unlike initialize(), this can be called multiple times to discover newly-added plugins.
+   */
+  async discoverNewPlugins(extensionDirs?: string[]): Promise<void> {
+    const discovered = await discoverPlugins(extensionDirs);
+    let newCount = 0;
+    for (const { path: pluginPath, manifest } of discovered) {
+      if (!this.plugins.has(manifest.name)) {
+        await this.loadAndRegister(pluginPath, manifest);
+        newCount++;
+      }
+    }
+    if (newCount > 0) {
+      console.log(`Discovered ${newCount} new plugin(s)`);
+    }
+  }
+
+  /**
    * Load and register a single plugin
    */
   private async loadAndRegister(pluginPath: string, manifest: PluginManifest): Promise<void> {

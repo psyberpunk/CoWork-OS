@@ -70,6 +70,12 @@ describe('BuiltinToolsSettingsManager - webfetch category', () => {
       expect(defaults.categories.search.enabled).toBe(true);
       expect(defaults.categories.search.priority).toBe('normal');
     });
+
+    it('should default to per-command run_command approval mode', () => {
+      const defaults = BuiltinToolsSettingsManager.getDefaultSettings();
+      expect(defaults.runCommandApprovalMode).toBe('per_command');
+      expect(BuiltinToolsSettingsManager.getRunCommandApprovalMode()).toBe('per_command');
+    });
   });
 
   describe('tool category mapping', () => {

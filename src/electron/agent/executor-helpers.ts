@@ -522,13 +522,32 @@ export class ToolCallDeduplicator {
   static isIdempotentTool(toolName: string): boolean {
     const idempotentTools = [
       'read_file',
+      'read_multiple_files',
       'list_directory',
+      'directory_tree',
       'search_files',
       'search_code',
       'get_file_info',
+      'canvas_list',
+      'canvas_checkpoints',
+      'task_history',
+      'channel_list_chats',
+      'channel_history',
       'web_search',
     ];
-    return idempotentTools.includes(toolName);
+    if (idempotentTools.includes(toolName)) {
+      return true;
+    }
+
+    // Treat "read-only by convention" tool names as idempotent to avoid
+    // duplicate-error loops on observational tools.
+    const readOnlyPrefixes = ['read_', 'list_', 'get_', 'search_', 'check_', 'describe_', 'query_'];
+    if (readOnlyPrefixes.some(prefix => toolName.startsWith(prefix))) {
+      return true;
+    }
+
+    const readOnlySuffixes = ['_list', '_status', '_history'];
+    return readOnlySuffixes.some(suffix => toolName.endsWith(suffix));
   }
 }
 
@@ -551,6 +570,14 @@ export class ToolFailureTracker {
   // Higher threshold for input-dependent errors since LLM might eventually get it right
   private readonly maxInputDependentFailures: number = 4;
 
+  private getMaxInputDependentFailures(toolName: string): number {
+    // AppleScript often needs a few iterative syntax/quoting fixes before succeeding.
+    if (toolName === 'run_applescript') {
+      return 8;
+    }
+    return this.maxInputDependentFailures;
+  }
+
   /**
    * Record a tool failure
    * @returns true if the tool should be disabled (circuit broken)
@@ -571,10 +598,12 @@ export class ToolFailureTracker {
       existing.lastError = errorMessage;
       this.inputDependentFailures.set(toolName, existing);
 
-      console.log(`[ToolFailureTracker] Input-dependent error for ${toolName} (${existing.count}/${this.maxInputDependentFailures}): ${errorMessage.substring(0, 80)}`);
+      const maxFailuresForTool = this.getMaxInputDependentFailures(toolName);
+
+      console.log(`[ToolFailureTracker] Input-dependent error for ${toolName} (${existing.count}/${maxFailuresForTool}): ${errorMessage.substring(0, 80)}`);
 
       // If LLM keeps making the same mistake, disable the tool
-      if (existing.count >= this.maxInputDependentFailures) {
+      if (existing.count >= maxFailuresForTool) {
         const reason = `LLM failed to provide correct parameters ${existing.count} times: ${errorMessage}`;
         this.disabledTools.set(toolName, { disabledAt: Date.now(), reason });
         console.log(`[ToolFailureTracker] Tool ${toolName} disabled after ${existing.count} consecutive input-dependent failures`);
@@ -647,6 +676,15 @@ export class ToolFailureTracker {
    * Provide guidance for alternative approaches when a tool fails
    */
   private getAlternativeApproachGuidance(toolName: string, error: string): string | undefined {
+    if (toolName === 'run_applescript') {
+      if (/syntax error/i.test(error)) {
+        return 'SUGGESTION: Keep AppleScript minimal and valid. Prefer plain multi-line AppleScript, avoid malformed "with timeout ... end timeout" wrappers, and escape shell command quotes carefully.';
+      }
+      if (/timed out/i.test(error)) {
+        return 'SUGGESTION: Break long shell operations into smaller AppleScript calls, then verify output incrementally instead of running a long installer/build in one script.';
+      }
+    }
+
     // Document editing failures - suggest manual steps or different tool
     if (toolName === 'edit_document' && (error.includes('images') || error.includes('binary') || error.includes('size'))) {
       return 'SUGGESTION: The edit_document tool cannot preserve images in DOCX files. Consider: (1) Create a separate document with the new content only, (2) Provide instructions for the user to manually merge the content, or (3) Use a different output format';

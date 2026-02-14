@@ -13,7 +13,7 @@ const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_TIMEOUT = 30 * 1000; // 30 seconds
-const APPLESCRIPT_TIMEOUT_MS = 120 * 1000; // 2 minutes
+const APPLESCRIPT_TIMEOUT_MS = 240 * 1000; // 4 minutes
 
 function getElectronApis(): { clipboard?: any; desktopCapturer?: any; shell?: any; app?: any } {
   try {
@@ -481,46 +481,98 @@ export class SystemTools {
       scriptLength: normalizedScript.length,
     });
 
-    try {
-      // Execute using osascript with multiple -e args (more robust than shell quoting)
-      const lines = normalizedScript
-        .split(/\r?\n/)
-        .map(line => line.trim())
-        .filter(line => line.length > 0);
-
-      if (lines.length === 0) {
-        throw new Error('AppleScript is empty after normalization');
-      }
-
-      const args = lines.flatMap(line => ['-e', line]);
-
-      const { stdout, stderr } = await execFileAsync('osascript', args, {
-        timeout: APPLESCRIPT_TIMEOUT_MS,
-        maxBuffer: 1024 * 1024, // 1MB buffer
-      });
-
-      const result = stdout.trim() || stderr.trim() || '(no output)';
-
-      this.daemon.logEvent(this.taskId, 'tool_result', {
-        tool: 'run_applescript',
-        success: true,
-        outputLength: result.length,
-      });
-
-      return {
-        success: true,
-        result,
-      };
-    } catch (error: any) {
-      this.daemon.logEvent(this.taskId, 'tool_error', {
-        tool: 'run_applescript',
-        error: error.message,
-      });
-
-      // Extract meaningful error message from osascript errors
-      const errorMessage = error.stderr?.trim() || error.message || 'Unknown error';
-      throw new Error(`AppleScript execution failed: ${errorMessage}`);
+    const attempts: Array<{ script: string; label: string }> = [
+      { script: normalizedScript, label: 'primary' },
+    ];
+    const timeoutWrapperFallback = this.stripAppleScriptTimeoutWrapper(normalizedScript);
+    if (timeoutWrapperFallback) {
+      attempts.push({ script: timeoutWrapperFallback, label: 'timeout_wrapper_fallback' });
     }
+
+    let lastError: any;
+    for (const attempt of attempts) {
+      try {
+        if (!attempt.script || !attempt.script.trim()) {
+          continue;
+        }
+
+        // Keep script as a single block to preserve structure of multi-line AppleScript.
+        const args = ['-e', attempt.script];
+        const { stdout, stderr } = await execFileAsync('osascript', args, {
+          timeout: APPLESCRIPT_TIMEOUT_MS,
+          maxBuffer: 1024 * 1024, // 1MB buffer
+        });
+
+        const result = stdout.trim() || stderr.trim() || '(no output)';
+
+        this.daemon.logEvent(this.taskId, 'tool_result', {
+          tool: 'run_applescript',
+          success: true,
+          outputLength: result.length,
+        });
+
+        return {
+          success: true,
+          result,
+        };
+      } catch (error: any) {
+        lastError = error;
+        const errorMessage = this.extractAppleScriptError(error);
+        const canRetryWithFallback =
+          attempt.label === 'primary' &&
+          attempts.length > 1 &&
+          /syntax error/i.test(errorMessage) &&
+          /timeout/i.test(errorMessage);
+
+        if (canRetryWithFallback) {
+          this.daemon.logEvent(this.taskId, 'tool_warning', {
+            tool: 'run_applescript',
+            warning: 'Retrying AppleScript without timeout wrapper due to syntax error',
+          });
+          continue;
+        }
+        break;
+      }
+    }
+
+    this.daemon.logEvent(this.taskId, 'tool_error', {
+      tool: 'run_applescript',
+      error: this.extractAppleScriptError(lastError),
+    });
+    throw new Error(`AppleScript execution failed: ${this.extractAppleScriptError(lastError)}`);
+  }
+
+  private extractAppleScriptError(error: any): string {
+    if (!error) return 'Unknown error';
+    if (typeof error.stderr === 'string' && error.stderr.trim()) {
+      return error.stderr.trim();
+    }
+    if (typeof error.stdout === 'string' && error.stdout.trim()) {
+      return error.stdout.trim();
+    }
+    if (typeof error.message === 'string' && error.message.trim()) {
+      return error.message.trim();
+    }
+    return String(error);
+  }
+
+  private stripAppleScriptTimeoutWrapper(script: string): string | null {
+    const trimmed = String(script || '').trim();
+    if (!trimmed) return null;
+
+    // Common model-generated wrapper:
+    // with timeout of N seconds
+    //   ...
+    // end timeout
+    const blockMatch = trimmed.match(
+      /^with\s+timeout\s+of\s+\d+\s+seconds\s*[\r\n]+([\s\S]*?)[\r\n]+end\s+timeout\s*$/i
+    );
+    if (blockMatch?.[1]) {
+      const unwrapped = blockMatch[1].trim();
+      return unwrapped.length > 0 && unwrapped !== trimmed ? unwrapped : null;
+    }
+
+    return null;
   }
 
   /**

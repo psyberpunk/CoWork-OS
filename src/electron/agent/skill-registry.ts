@@ -18,9 +18,14 @@ import {
   SkillInstallProgress,
 } from '../../shared/types';
 
-// Default registry URL - can be overridden via SKILLHUB_REGISTRY env var
-const DEFAULT_REGISTRY_URL = process.env.SKILLHUB_REGISTRY || 'https://skill-hub.com/api';
+// Default registry URL - can be overridden via SKILLHUB_REGISTRY env var.
+// When pointing to a GitHub raw URL with a catalog.json, the static catalog mode is used.
+const DEFAULT_REGISTRY_URL = process.env.SKILLHUB_REGISTRY
+  || 'https://raw.githubusercontent.com/CoWork-OS/CoWork-OS/main/registry';
 const SKILLS_FOLDER_NAME = 'skills';
+
+// Cache for the static catalog (avoids re-fetching on every search)
+const CATALOG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // Regex for valid skill IDs: lowercase alphanumeric, hyphens, underscores
 // This prevents path traversal attacks via malicious skill IDs
@@ -68,6 +73,7 @@ export type InstallProgressCallback = (progress: SkillInstallProgress) => void;
 export class SkillRegistry {
   private registryUrl: string;
   private managedSkillsDir: string;
+  private catalogCache: { entries: SkillRegistryEntry[]; fetchedAt: number } | null = null;
 
   constructor(config?: SkillRegistryConfig) {
     this.registryUrl = config?.registryUrl || DEFAULT_REGISTRY_URL;
@@ -77,6 +83,49 @@ export class SkillRegistry {
 
     // Ensure managed skills directory exists
     this.ensureSkillsDirectory();
+  }
+
+  /**
+   * Detect whether the registry URL points to a static catalog (GitHub raw content)
+   * rather than a REST API server.
+   */
+  private isStaticCatalog(): boolean {
+    const url = this.registryUrl.toLowerCase();
+    return (
+      url.includes('raw.githubusercontent.com') ||
+      url.includes('github.io') ||
+      url.endsWith('/registry') ||
+      url.endsWith('/registry/')
+    );
+  }
+
+  /**
+   * Fetch the static catalog.json and cache it.
+   */
+  private async fetchCatalog(): Promise<SkillRegistryEntry[]> {
+    if (this.catalogCache && (Date.now() - this.catalogCache.fetchedAt) < CATALOG_CACHE_TTL_MS) {
+      return this.catalogCache.entries;
+    }
+
+    try {
+      const catalogUrl = this.registryUrl.endsWith('/')
+        ? `${this.registryUrl}catalog.json`
+        : `${this.registryUrl}/catalog.json`;
+
+      const response = await fetch(catalogUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch catalog: ${response.status}`);
+      }
+
+      const data = await response.json() as { skills?: SkillRegistryEntry[] };
+      const entries = Array.isArray(data.skills) ? data.skills : [];
+      this.catalogCache = { entries, fetchedAt: Date.now() };
+      console.log(`[SkillRegistry] Loaded catalog with ${entries.length} skills`);
+      return entries;
+    } catch (error) {
+      console.error('[SkillRegistry] Failed to fetch catalog:', error);
+      return this.catalogCache?.entries || [];
+    }
   }
 
   /**
@@ -102,6 +151,11 @@ export class SkillRegistry {
   async search(query: string, options?: { page?: number; pageSize?: number }): Promise<SkillSearchResult> {
     const page = options?.page ?? 1;
     const pageSize = options?.pageSize ?? 20;
+
+    // Static catalog mode: fetch catalog.json and filter client-side
+    if (this.isStaticCatalog()) {
+      return this.searchCatalog(query, page, pageSize);
+    }
 
     try {
       const url = new URL(`${this.registryUrl}/skills/search`);
@@ -131,6 +185,41 @@ export class SkillRegistry {
   }
 
   /**
+   * Search the cached catalog client-side
+   */
+  private async searchCatalog(query: string, page: number, pageSize: number): Promise<SkillSearchResult> {
+    try {
+      const entries = await this.fetchCatalog();
+      const q = (query || '').toLowerCase().trim();
+
+      const filtered = q
+        ? entries.filter(
+            (s) =>
+              s.name.toLowerCase().includes(q) ||
+              s.description.toLowerCase().includes(q) ||
+              s.id.toLowerCase().includes(q) ||
+              (s.tags || []).some((t) => t.toLowerCase().includes(q)) ||
+              (s.category || '').toLowerCase().includes(q)
+          )
+        : entries;
+
+      const start = (page - 1) * pageSize;
+      const results = filtered.slice(start, start + pageSize);
+
+      return {
+        query,
+        total: filtered.length,
+        page,
+        pageSize,
+        results,
+      };
+    } catch (error) {
+      console.error('[SkillRegistry] Catalog search failed:', error);
+      return { query, total: 0, page, pageSize, results: [] };
+    }
+  }
+
+  /**
    * Get skill details from registry
    */
   async getSkillDetails(skillId: string): Promise<SkillRegistryEntry | null> {
@@ -139,6 +228,12 @@ export class SkillRegistry {
     if (!safeId) {
       console.error(`[SkillRegistry] Invalid skill ID: ${skillId}`);
       return null;
+    }
+
+    // Static catalog mode: lookup from catalog.json
+    if (this.isStaticCatalog()) {
+      const entries = await this.fetchCatalog();
+      return entries.find((s) => s.id === safeId) || null;
     }
 
     try {
@@ -184,9 +279,11 @@ export class SkillRegistry {
       notify({ status: 'downloading', progress: 0, message: 'Fetching skill from registry...' });
 
       // Fetch skill data from registry
-      const url = version
-        ? `${this.registryUrl}/skills/${safeId}/download?version=${version}`
-        : `${this.registryUrl}/skills/${safeId}/download`;
+      const url = this.isStaticCatalog()
+        ? `${this.registryUrl.replace(/\/$/, '')}/skills/${safeId}.json`
+        : version
+          ? `${this.registryUrl}/skills/${safeId}/download?version=${version}`
+          : `${this.registryUrl}/skills/${safeId}/download`;
 
       const response = await fetch(url);
 

@@ -43,7 +43,10 @@ export class CanvasTools {
   private enforceSessionCutoff(sessionId: string, action: 'canvas_push' | 'canvas_open_url'): void {
     if (!this.sessionCutoff) return;
     const session = this.manager.getSession(sessionId);
-    if (session && session.createdAt < this.sessionCutoff) {
+    if (!session) return;
+    // Allow follow-up pushes to sessions created by the same task
+    if (session.taskId === this.taskId) return;
+    if (session.createdAt < this.sessionCutoff) {
       const message = 'Canvas session belongs to a previous run. Create a new session with canvas_create for follow-up content instead of reusing an older session.';
       console.error(`[CanvasTools] ${action} blocked for stale session. sessionId=${sessionId}, createdAt=${session.createdAt}, cutoff=${this.sessionCutoff}`);
       throw new Error(message);
@@ -381,6 +384,96 @@ export class CanvasTools {
   }
 
   /**
+   * Save a named checkpoint of the current canvas state
+   */
+  async saveCheckpoint(
+    sessionId: string,
+    label?: string
+  ): Promise<{ checkpointId: string; label: string; fileCount: number }> {
+    this.daemon.logEvent(this.taskId, 'tool_call', {
+      tool: 'canvas_checkpoint',
+      sessionId,
+      label,
+    });
+
+    try {
+      const checkpoint = await this.manager.saveCheckpoint(sessionId, label);
+
+      this.daemon.logEvent(this.taskId, 'tool_result', {
+        tool: 'canvas_checkpoint',
+        success: true,
+        checkpointId: checkpoint.id,
+      });
+
+      return {
+        checkpointId: checkpoint.id,
+        label: checkpoint.label,
+        fileCount: Object.keys(checkpoint.files).length,
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.daemon.logEvent(this.taskId, 'tool_error', {
+        tool: 'canvas_checkpoint',
+        error: message,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Restore canvas to a previously saved checkpoint
+   */
+  async restoreCheckpoint(
+    sessionId: string,
+    checkpointId: string
+  ): Promise<{ success: boolean; label: string }> {
+    this.daemon.logEvent(this.taskId, 'tool_call', {
+      tool: 'canvas_restore',
+      sessionId,
+      checkpointId,
+    });
+
+    try {
+      const checkpoint = await this.manager.restoreCheckpoint(sessionId, checkpointId);
+
+      this.daemon.logEvent(this.taskId, 'tool_result', {
+        tool: 'canvas_restore',
+        success: true,
+        label: checkpoint.label,
+      });
+
+      return { success: true, label: checkpoint.label };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.daemon.logEvent(this.taskId, 'tool_error', {
+        tool: 'canvas_restore',
+        error: message,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * List checkpoints for a canvas session
+   */
+  listCheckpoints(sessionId: string): {
+    checkpoints: Array<{
+      id: string;
+      label: string;
+      createdAt: number;
+    }>;
+  } {
+    const checkpoints = this.manager.listCheckpoints(sessionId);
+    return {
+      checkpoints: checkpoints.map((cp) => ({
+        id: cp.id,
+        label: cp.label,
+        createdAt: cp.createdAt,
+      })),
+    };
+  }
+
+  /**
    * List all canvas sessions for the current task
    */
   listSessions(): {
@@ -565,6 +658,61 @@ export class CanvasTools {
           type: 'object',
           properties: {},
           required: [],
+        },
+      },
+      {
+        name: 'canvas_checkpoint',
+        description:
+          'Save a named checkpoint of the current canvas state. ' +
+          'This captures all files in the session directory so you can restore to this exact state later. ' +
+          'Useful before making experimental changes to the canvas content.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            session_id: {
+              type: 'string',
+              description: 'The canvas session ID',
+            },
+            label: {
+              type: 'string',
+              description: 'Optional human-readable label for this checkpoint (e.g., "before color changes")',
+            },
+          },
+          required: ['session_id'],
+        },
+      },
+      {
+        name: 'canvas_restore',
+        description:
+          'Restore a canvas session to a previously saved checkpoint. ' +
+          'This reverts all files in the session directory to the checkpoint state and reloads the canvas.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            session_id: {
+              type: 'string',
+              description: 'The canvas session ID',
+            },
+            checkpoint_id: {
+              type: 'string',
+              description: 'The checkpoint ID to restore (from canvas_checkpoints)',
+            },
+          },
+          required: ['session_id', 'checkpoint_id'],
+        },
+      },
+      {
+        name: 'canvas_checkpoints',
+        description: 'List all saved checkpoints for a canvas session',
+        input_schema: {
+          type: 'object',
+          properties: {
+            session_id: {
+              type: 'string',
+              description: 'The canvas session ID',
+            },
+          },
+          required: ['session_id'],
         },
       },
     ];

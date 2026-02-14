@@ -26,6 +26,8 @@ export interface ToolOverride {
   priority?: 'high' | 'normal' | 'low';
 }
 
+export type RunCommandApprovalMode = 'per_command' | 'single_bundle';
+
 /**
  * Built-in tools settings structure
  */
@@ -48,6 +50,8 @@ export interface BuiltinToolsSettings {
   toolTimeouts: Record<string, number>;
   // Per-tool auto-approval overrides (tool name -> enabled)
   toolAutoApprove: Record<string, boolean>;
+  // Run-command approval behavior
+  runCommandApprovalMode: RunCommandApprovalMode;
   // Version for migrations
   version: string;
 }
@@ -106,6 +110,7 @@ const DEFAULT_SETTINGS: BuiltinToolsSettings = {
   toolOverrides: {},
   toolTimeouts: {},
   toolAutoApprove: {},
+  runCommandApprovalMode: 'per_command',
   version: '1.0.0',
 };
 
@@ -326,6 +331,7 @@ export class BuiltinToolsSettingsManager {
       toolOverrides: settings.toolOverrides || {},
       toolTimeouts: settings.toolTimeouts || {},
       toolAutoApprove: settings.toolAutoApprove || {},
+      runCommandApprovalMode: settings.runCommandApprovalMode === 'single_bundle' ? 'single_bundle' : 'per_command',
       version: settings.version || defaults.version,
     };
   }
@@ -396,6 +402,16 @@ export class BuiltinToolsSettingsManager {
   static getToolAutoApprove(toolName: string): boolean {
     const settings = this.loadSettings();
     return Boolean(settings.toolAutoApprove?.[toolName]);
+  }
+
+  /**
+   * Get run_command approval mode
+   */
+  static getRunCommandApprovalMode(): RunCommandApprovalMode {
+    const settings = this.loadSettings();
+    return settings.runCommandApprovalMode === 'single_bundle'
+      ? 'single_bundle'
+      : 'per_command';
   }
 
   /**

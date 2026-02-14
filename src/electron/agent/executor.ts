@@ -62,6 +62,11 @@ export class TaskExecutor {
   private lastWebFetchFailure: { timestamp: number; tool: 'web_fetch' | 'http_request'; url?: string; error?: string; status?: number } | null = null;
   private readonly requiresTestRun: boolean;
   private testRunObserved = false;
+  private readonly requiresExecutionToolRun: boolean;
+  private executionToolRunObserved = false;
+  private executionToolAttemptObserved = false;
+  private executionToolLastError = '';
+  private allowExecutionWithoutShell = false;
   private cancelled = false;
   private paused = false;
   private taskCompleted = false;  // Prevents any further processing after task completes
@@ -83,6 +88,7 @@ export class TaskExecutor {
   private lastNonVerificationOutput: string | null = null;
   private readonly toolResultMemoryLimit = 8;
   private lastRecoveryFailureSignature = '';
+  private recoveredFailureStepIds: Set<string> = new Set();
   private readonly shouldPauseForQuestions: boolean;
   private dispatchedMentionedAgents = false;
   private lastAssistantText: string | null = null;
@@ -116,6 +122,13 @@ export class TaskExecutor {
     if (TaskExecutor.RESULT_SUMMARY_PLACEHOLDERS.has(trimmed.toLowerCase())) return false;
     if (trimmed.length < TaskExecutor.MIN_RESULT_SUMMARY_LENGTH) return false;
     return true;
+  }
+
+  private getRecoveredFailureStepIdSet(): Set<string> {
+    if (!(this.recoveredFailureStepIds instanceof Set)) {
+      this.recoveredFailureStepIds = new Set();
+    }
+    return this.recoveredFailureStepIds;
   }
 
   private static readonly PINNED_MEMORY_RECALL_TAG = '<cowork_memory_recall>';
@@ -760,6 +773,7 @@ ${transcript}
     this.recoveryRequestActive = this.isRecoveryIntent(this.lastUserMessage);
     this.capabilityUpgradeRequested = this.isCapabilityUpgradeIntent(this.lastUserMessage);
     this.requiresTestRun = this.detectTestRequirement(`${task.title}\n${task.prompt}`);
+    this.requiresExecutionToolRun = this.detectExecutionRequirement(`${task.title}\n${task.prompt}`);
     const allowUserInput = task.agentConfig?.allowUserInput ?? true;
     const autonomousMode = task.agentConfig?.autonomousMode === true;
     // Only interactive main tasks should pause for user input.
@@ -1124,7 +1138,9 @@ ${transcript}
     }
 
     if (toolName === 'run_applescript') {
-      return normalizedSettingsTimeout ?? 120 * 1000;
+      // AppleScript often wraps shell workflows (installs/builds) that can legitimately
+      // run longer than the default tool timeout.
+      return normalizedSettingsTimeout ?? 240 * 1000;
     }
 
     if (toolName === 'generate_image') {
@@ -1134,6 +1150,69 @@ ${transcript}
     }
 
     return normalizedSettingsTimeout ?? TOOL_TIMEOUT_MS;
+  }
+
+  private shouldEmitToolExecutionHeartbeat(toolName: string, toolTimeoutMs: number, input: unknown): boolean {
+    if (toolName === 'run_applescript' || toolName === 'run_command' || toolName === 'wait_for_agent') {
+      return true;
+    }
+
+    if (toolName === 'spawn_agent') {
+      const toolInput = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
+      return toolInput.wait === true;
+    }
+
+    return toolTimeoutMs >= 90_000;
+  }
+
+  private beginToolExecutionHeartbeat(toolName: string, toolTimeoutMs: number, input: unknown): (() => void) | null {
+    if (!this.shouldEmitToolExecutionHeartbeat(toolName, toolTimeoutMs, input)) {
+      return null;
+    }
+
+    const startedAt = Date.now();
+    const heartbeatIntervalMs = 12_000;
+
+    const emitProgress = (heartbeat: boolean): void => {
+      const elapsedMs = Date.now() - startedAt;
+      const elapsedSeconds = Math.max(1, Math.round(elapsedMs / 1000));
+      this.daemon.logEvent(this.task.id, 'progress_update', {
+        phase: 'tool_execution',
+        state: 'active',
+        tool: toolName,
+        heartbeat,
+        elapsedMs,
+        timeoutMs: toolTimeoutMs,
+        message: heartbeat
+          ? `Still running ${toolName} (${elapsedSeconds}s elapsed)`
+          : `Running ${toolName}`,
+      });
+    };
+
+    emitProgress(false);
+
+    const timer = setInterval(() => {
+      if (this.cancelled || this.taskCompleted) return;
+      emitProgress(true);
+    }, heartbeatIntervalMs);
+
+    return () => clearInterval(timer);
+  }
+
+  private async executeToolWithHeartbeat(toolName: string, input: unknown, toolTimeoutMs: number): Promise<any> {
+    const stopHeartbeat = this.beginToolExecutionHeartbeat(toolName, toolTimeoutMs, input);
+    try {
+      return await withTimeout(
+        this.toolRegistry.executeTool(
+          toolName,
+          input as any
+        ),
+        toolTimeoutMs,
+        `Tool ${toolName}`
+      );
+    } finally {
+      stopHeartbeat?.();
+    }
   }
 
   /**
@@ -1260,6 +1339,13 @@ ${transcript}
   }
 
   /**
+   * Detect whether the task explicitly expects command execution (not just analysis/writing)
+   */
+  private detectExecutionRequirement(prompt: string): boolean {
+    return this.followUpRequiresCommandExecution(prompt);
+  }
+
+  /**
    * Determine if a shell command is a test command
    */
   private isTestCommand(command: string): boolean {
@@ -1291,6 +1377,9 @@ ${transcript}
   private stepRequiresImageVerification(step: PlanStep): boolean {
     const description = (step.description || '').toLowerCase();
     if (!description.includes('verify')) return false;
+    // Canvas snapshots are in-memory (base64), not file-based images —
+    // skip file-based image verification for canvas-related steps.
+    if (description.includes('canvas') || description.includes('snapshot')) return false;
     return IMAGE_VERIFICATION_KEYWORDS.some((keyword: string) => description.includes(keyword));
   }
 
@@ -2037,7 +2126,7 @@ You are continuing a previous conversation. The context from the previous conver
           .map(s => s.description)
           .slice(0, 20), // Limit to 20 steps
         failedSteps: this.plan.steps
-          .filter(s => s.status === 'failed')
+          .filter(s => s.status === 'failed' && !this.getRecoveredFailureStepIdSet().has(s.id))
           .map(s => ({ description: s.description, error: s.error }))
           .slice(0, 10),
       } : undefined;
@@ -2234,6 +2323,9 @@ You are continuing a previous conversation. The context from the previous conver
    */
   updateWorkspace(workspace: Workspace): void {
     this.workspace = workspace;
+    if (workspace.permissions.shell) {
+      this.allowExecutionWithoutShell = false;
+    }
     // Recreate tool registry to pick up new permissions (e.g., shell enabled)
     this.toolRegistry = new ToolRegistry(
       workspace,
@@ -2324,6 +2416,7 @@ You are continuing a previous conversation. The context from the previous conver
     this.lastAssistantOutput = null;
     this.lastNonVerificationOutput = null;
     this.lastRecoveryFailureSignature = '';
+    this.getRecoveredFailureStepIdSet().clear();
 
     // Add context for LLM about retry
     this.conversationHistory.push({
@@ -2374,11 +2467,101 @@ You are continuing a previous conversation. The context from the previous conver
   private isCapabilityRefusal(text: string): boolean {
     const lower = (text || '').toLowerCase();
     return /\b(?:i do not have access|i don't have access|i can(?:not|'?t)\s+(?:use|launch|access|do)|there(?:'s| is)\s+no way|only\s+\w+\s+(?:options?|available)|not available to me|not supported)\b/.test(lower)
+      || /\b(?:i can(?:not|'?t)|unable to)\s+(?:run|execute|perform|create|complete)\b/.test(lower)
+      || (/\bin this environment\b/.test(lower) && /\b(?:cannot|can't|unable|no)\b/.test(lower))
+      || /\b(?:no|without)\s+(?:wallet keys?|solana cli|cli access|shell access|permissions?)\b/.test(lower)
       || /\b(?:only\s+supports?|supports?\s+only)\b/.test(lower)
       || /\bonly\s+(?:chromium|chrome|google chrome)\b/.test(lower)
       || /\b(?:chromium|chrome|google chrome)\s+(?:only|are\s+the\s+only)\b/.test(lower)
       || /\b(?:isn['’]?t|is not)\s+available(?:\s+as\s+an?\s+option)?\b/.test(lower)
       || /\bnot\s+available\s+as\s+an?\s+option\b/.test(lower);
+  }
+
+  private followUpRequiresCommandExecution(message: string): boolean {
+    const lower = (message || '').toLowerCase().trim();
+    if (!lower) return false;
+
+    if (/^(?:ok|okay|thanks|thank you|got it|sounds good|perfect|nice)(?:[.!])?$/.test(lower)) {
+      return false;
+    }
+
+    const executionVerb = /\b(?:run|execute|install|build|deploy|create|mint|airdrop|launch|start|set\s*up|setup)\b/.test(lower);
+    const executionTarget = /\b(?:command|commands|cli|terminal|script|token|solana|devnet|npm|pnpm|yarn)\b/.test(lower);
+    return executionVerb && executionTarget;
+  }
+
+  private isExecutionTool(toolName: string): boolean {
+    return toolName === 'run_command' || toolName === 'run_applescript';
+  }
+
+  private classifyShellPermissionDecision(text: string): 'enable_shell' | 'continue_without_shell' | 'unknown' {
+    const lower = String(text || '').toLowerCase().trim();
+    if (!lower) return 'unknown';
+
+    if (/^(?:yes|yep|yeah|sure|ok|okay|please do|do it)[.!]?$/.test(lower)) {
+      return 'enable_shell';
+    }
+    if (/^(?:no|nope|nah)[.!]?$/.test(lower)) {
+      return 'continue_without_shell';
+    }
+    if (
+      /\b(?:enable|turn on|allow|grant)\b[\s\S]{0,20}\bshell\b/.test(lower)
+      || /\bshell\b[\s\S]{0,20}\b(?:enable|enabled|on|allow|grant)\b/.test(lower)
+    ) {
+      return 'enable_shell';
+    }
+    if (
+      /\b(?:continue|proceed|go ahead|move on)\b/.test(lower)
+      || /\bwithout shell\b/.test(lower)
+      || /\b(?:don['’]?t|do not)\s+enable\s+shell\b/.test(lower)
+      || /\bbest effort\b/.test(lower)
+      || /\blimited\b/.test(lower)
+    ) {
+      return 'continue_without_shell';
+    }
+
+    return 'unknown';
+  }
+
+  private preflightShellExecutionCheck(): boolean {
+    if (!this.shouldPauseForQuestions) return false;
+    if (!this.requiresExecutionToolRun) return false;
+    if (this.allowExecutionWithoutShell) return false;
+    if (this.workspace.permissions.shell) return false;
+
+    const askedBefore = this.lastPauseReason?.startsWith('shell_permission_') === true;
+    const message = askedBefore
+      ? 'Shell access is still disabled for this workspace, so I still cannot run the required commands. ' +
+        'Do you want to enable Shell access now? Reply "enable shell" (recommended), or reply "continue without shell" and I will proceed with a limited best-effort path.'
+      : 'This task requires running commands, but Shell access is currently disabled for this workspace. ' +
+        'Do you want to enable Shell access now? Reply "enable shell" (recommended), or reply "continue without shell".';
+
+    this.pauseForUserInput(message, askedBefore ? 'shell_permission_still_disabled' : 'shell_permission_required');
+    return true;
+  }
+
+  private buildExecutionRequiredFollowUpInstruction(opts: {
+    attemptedExecutionTool: boolean;
+    lastExecutionError: string;
+    shellEnabled: boolean;
+  }): string {
+    const blockerHint = !opts.shellEnabled
+      ? 'Note: shell permission is currently OFF in this workspace, so run_command is unavailable.'
+      : '';
+    const errorHint = opts.lastExecutionError
+      ? `Latest execution error: ${opts.lastExecutionError.slice(0, 220)}`
+      : '';
+
+    return [
+      'Execution is not complete yet.',
+      'You must actually run commands to complete this request, not only write files or provide guidance.',
+      blockerHint,
+      errorHint,
+      opts.attemptedExecutionTool
+        ? 'Retry with a concrete execution path now. If blocked by permissions/credentials, state the exact blocker and request only that missing input.'
+        : 'Use run_command (or a viable fallback) now to execute the workflow end-to-end.',
+      'Do not end this response until you have either executed commands successfully or reported a concrete blocker.',
+    ].filter(Boolean).join('\n');
   }
 
   private isRecoveryPlanStep(description: string): boolean {
@@ -2394,10 +2577,103 @@ You are continuing a previous conversation. The context from the previous conver
     return `${String(stepDescription || '')}::${String(reason || '').slice(0, 240).toLowerCase()}`;
   }
 
-  private requestPlanRevision(newSteps: Array<{ description: string }>, reason: string, clearRemaining: boolean = false): void {
+  private isUserActionRequiredFailure(reason: string): boolean {
+    const lower = String(reason || '').toLowerCase();
+    if (!lower) return false;
+
+    const rateLimitedExternalDependency =
+      lower.includes('429') ||
+      lower.includes('too many requests') ||
+      lower.includes('rate limit') ||
+      lower.includes('faucet has run dry') ||
+      lower.includes('airdrop limit');
+
+    return /action required/.test(lower)
+      || /approve|approval|user denied|denied approval/.test(lower)
+      || /connect|reconnect|integration/.test(lower)
+      || /auth|authorization|unauthorized|credential|login/.test(lower)
+      || /permission/.test(lower)
+      || /api key|token required/.test(lower)
+      || rateLimitedExternalDependency
+      || /provide.*(path|value|input)/.test(lower);
+  }
+
+  private shouldAutoPlanRecovery(step: PlanStep, reason: string): boolean {
+    if (this.isRecoveryPlanStep(step.description)) return false;
+    if (isVerificationStepDescription(step.description)) return false;
+    if (this.isUserActionRequiredFailure(reason)) return false;
+    if (this.planRevisionCount >= this.maxPlanRevisions) return false;
+
+    const lower = String(reason || '').toLowerCase();
+    if (!lower) return false;
+
+    return lower.includes('all required tools are unavailable or failed')
+      || lower.includes('one or more tools failed without recovery')
+      || lower.includes('run_command failed')
+      || lower.includes('cannot complete this task')
+      || lower.includes('without a workaround')
+      || lower.includes('limitation statement')
+      || lower.includes('without attempting any tool action')
+      || lower.includes('execution-oriented task finished without attempting run_command/run_applescript')
+      || lower.includes('timed out')
+      || lower.includes('access denied')
+      || lower.includes('syntax error')
+      || lower.includes('disabled')
+      || lower.includes('not available')
+      || lower.includes('duplicate call');
+  }
+
+  private extractToolErrorSummaries(toolResults: LLMToolResult[]): string[] {
+    const summaries: string[] = [];
+    for (const result of toolResults || []) {
+      if (!result || !result.is_error) continue;
+      let parsedError = '';
+      if (typeof result.content === 'string') {
+        try {
+          const parsed = JSON.parse(result.content);
+          if (typeof parsed?.error === 'string') parsedError = parsed.error;
+        } catch {
+          parsedError = result.content;
+        }
+      }
+      const trimmed = String(parsedError || '').trim();
+      if (trimmed) summaries.push(trimmed.slice(0, 180));
+    }
+    return summaries;
+  }
+
+  private buildToolRecoveryInstruction(opts: {
+    disabled: boolean;
+    duplicate: boolean;
+    unavailable: boolean;
+    hardFailure: boolean;
+    errors: string[];
+  }): string {
+    const blockers: string[] = [];
+    if (opts.disabled) blockers.push('disabled tool');
+    if (opts.duplicate) blockers.push('duplicate call loop');
+    if (opts.unavailable) blockers.push('tool unavailable in this context');
+    if (opts.hardFailure) blockers.push('hard failure');
+    const blockerSummary = blockers.length > 0 ? blockers.join(', ') : 'tool failure loop';
+    const errorPreview = opts.errors.slice(0, 3).join(' | ');
+
+    return [
+      'RECOVERY MODE:',
+      `The previous tool attempt hit a ${blockerSummary}.`,
+      errorPreview ? `Latest errors: ${errorPreview}` : '',
+      'Do NOT repeat the same tool call with identical inputs.',
+      'Choose a different strategy now:',
+      '1) Switch tools or adjust inputs materially.',
+      '2) If blocked by environment/tool limits, implement a minimal safe workaround in-repo and continue.',
+      '3) If still blocked by permissions/policy, produce a concrete partial result and clearly state the remaining blocker.',
+      'Continue executing without asking the user unless policy or credentials explicitly require user action.',
+    ].filter(Boolean).join('\n');
+  }
+
+  private requestPlanRevision(newSteps: Array<{ description: string }>, reason: string, clearRemaining: boolean = false): boolean {
     if (!this.plan) {
       console.warn('[TaskExecutor] Cannot revise plan - no plan exists');
-      return;
+      return false;
     }
 
     // Check plan revision limit to prevent infinite loops
@@ -2409,19 +2685,19 @@ You are continuing a previous conversation. The context from the previous conver
         attemptedRevision: reason,
         revisionCount: this.planRevisionCount,
       });
-      return;
+      return false;
     }
-    this.handlePlanRevision(newSteps, reason, clearRemaining);
+    return this.handlePlanRevision(newSteps, reason, clearRemaining);
   }
 
   /**
    * Handle plan revision request from the LLM
    * Can add new steps, clear remaining steps, or both
    */
-  private handlePlanRevision(newSteps: Array<{ description: string }>, reason: string, clearRemaining: boolean = false): void {
+  private handlePlanRevision(newSteps: Array<{ description: string }>, reason: string, clearRemaining: boolean = false): boolean {
     if (!this.plan) {
       console.warn('[TaskExecutor] Cannot revise plan - no plan exists');
-      return;
+      return false;
     }
 
     // If clearRemaining is true, remove all pending steps
@@ -2456,7 +2732,7 @@ You are continuing a previous conversation. The context from the previous conver
         revisionsRemaining: this.maxPlanRevisions - this.planRevisionCount,
       });
       console.log(`[TaskExecutor] Plan revised (${this.planRevisionCount}/${this.maxPlanRevisions}): cleared ${clearedCount} steps. Reason: ${reason}`);
-      return;
+      return true;
     }
 
     // Check for similar steps that have already failed (prevent retrying same approach)
@@ -2483,7 +2759,7 @@ You are continuing a previous conversation. The context from the previous conver
         attemptedRevision: reason,
         failedSteps: existingFailedSteps.map(s => s.description),
       });
-      return;
+      return false;
     }
 
     // Check if adding new steps would exceed the maximum total steps limit
@@ -2496,7 +2772,7 @@ You are continuing a previous conversation. The context from the previous conver
           attemptedSteps: newSteps.length,
           currentSteps: this.plan.steps.length,
         });
-        return;
+        return false;
       }
       // Truncate to allowed number
       console.warn(`[TaskExecutor] Truncating revision from ${newSteps.length} to ${allowedNewSteps} steps due to limit`);
@@ -2532,6 +2808,7 @@ You are continuing a previous conversation. The context from the previous conver
     });
 
     console.log(`[TaskExecutor] Plan revised (${this.planRevisionCount}/${this.maxPlanRevisions}): ${clearRemaining ? `cleared ${clearedCount} steps, ` : ''}added ${newSteps.length} steps. Reason: ${reason}`);
+    return true;
   }
 
   /**
@@ -2825,6 +3102,10 @@ You are continuing a previous conversation. The context from the previous conver
   private preflightWorkspaceCheck(): boolean {
     if (!this.shouldPauseForQuestions) {
       return false;
+    }
+
+    if (this.preflightShellExecutionCheck()) {
+      return true;
     }
 
     // If the user has acknowledged the workspace preflight warning, don't block again.
@@ -3723,6 +4004,20 @@ You are continuing a previous conversation. The context from the previous conver
         throw new Error('Task required running tests, but no test command was executed.');
       }
 
+      if (this.requiresExecutionToolRun && !this.allowExecutionWithoutShell && !this.executionToolRunObserved) {
+        const shellDisabled = !this.workspace.permissions.shell;
+        const blocker = shellDisabled
+          ? 'shell permission is OFF for this workspace'
+          : this.executionToolAttemptObserved
+            ? (
+              this.executionToolLastError
+                ? `execution tools failed. Latest error: ${this.executionToolLastError}`
+                : 'execution tools were attempted but did not complete successfully'
+            )
+            : 'no execution tool (run_command/run_applescript) was used';
+        throw new Error(`Task required command execution, but execution did not complete: ${blocker}.`);
+      }
+
       // Phase 3: Completion (single guarded finalizer path)
       this.finalizeTask(this.buildResultSummary());
     } catch (error: any) {
@@ -4264,14 +4559,29 @@ Format your plan as a JSON object with this structure:
       );
     }
 
-    // Check if any steps failed
+    // Check if any steps failed (excluding failures with explicit recovery plan steps)
     const failedSteps = this.plan.steps.filter(s => s.status === 'failed');
+    const unrecoveredFailedSteps = failedSteps.filter((failedStep) => {
+      if (!this.getRecoveredFailureStepIdSet().has(failedStep.id)) {
+        return true;
+      }
+      const failedStepIndex = this.plan?.steps.findIndex(s => s.id === failedStep.id) ?? -1;
+      if (failedStepIndex < 0) {
+        return true;
+      }
+      const hasCompletedRecoveryStep = this.plan!.steps
+        .slice(failedStepIndex + 1)
+        .some((candidate) =>
+          candidate.status === 'completed' && this.isRecoveryPlanStep(candidate.description)
+        );
+      return !hasCompletedRecoveryStep;
+    });
     const successfulSteps = this.plan.steps.filter(s => s.status === 'completed');
 
-    if (failedSteps.length > 0) {
+    if (failedSteps.length > 0 && unrecoveredFailedSteps.length > 0) {
       // Log warning about failed steps
-      const failedDescriptions = failedSteps.map(s => s.description).join(', ');
-      console.log(`[TaskExecutor] ${failedSteps.length} step(s) failed: ${failedDescriptions}`);
+      const failedDescriptions = unrecoveredFailedSteps.map(s => s.description).join(', ');
+      console.log(`[TaskExecutor] ${unrecoveredFailedSteps.length} unrecovered step(s) failed: ${failedDescriptions}`);
 
       const totalSteps = this.plan.steps.length;
       const progress = totalSteps > 0 ? Math.round((successfulSteps.length / totalSteps) * 100) : 0;
@@ -4280,12 +4590,21 @@ Format your plan as a JSON object with this structure:
         completedSteps: successfulSteps.length,
         totalSteps,
         progress,
-        message: `Execution failed: ${failedSteps.length} step(s) failed`,
+        message: `Execution failed: ${unrecoveredFailedSteps.length} step(s) failed`,
         hasFailures: true,
       });
 
-      // Any failed step means the task is not complete.
-      throw new Error(`Task failed: ${failedSteps.length} step(s) failed - ${failedSteps.map(s => s.description).join('; ')}`);
+      throw new Error(`Task failed: ${unrecoveredFailedSteps.length} step(s) failed - ${unrecoveredFailedSteps.map(s => s.description).join('; ')}`);
+    }
+
+    if (failedSteps.length > 0 && unrecoveredFailedSteps.length === 0) {
+      this.daemon.logEvent(this.task.id, 'progress_update', {
+        phase: 'execution',
+        completedSteps: successfulSteps.length,
+        totalSteps: this.plan.steps.length,
+        progress: 100,
+        message: `Recovered from ${failedSteps.length} failed step(s) via alternate plan steps`,
+      });
     }
 
     // Emit completion progress (only if no critical failures)
@@ -4637,7 +4956,9 @@ TASK / CONVERSATION HISTORY:
       let stepFailed = false;  // Track if step failed due to all tools being disabled/erroring
       let lastFailureReason = '';  // Track the reason for failure
       let stepAttemptedToolUse = false;
+      let stepAttemptedExecutionTool = false;
       let capabilityRefusalDetected = false;
+      let limitationRefusalWithoutAction = false;
       let hadToolError = false;
       let hadToolSuccessAfterError = false;
       let hadAnyToolSuccess = false;
@@ -4661,6 +4982,7 @@ TASK / CONVERSATION HISTORY:
       let lastTurnMemoryRecallBlock = '';
       let lastSharedContextKey = '';
       let lastSharedContextBlock = '';
+      let toolRecoveryHintInjected = false;
 
       const getUserActionRequiredPauseReason = (toolName: string, errorMessage: string): string | null => {
         const message = typeof errorMessage === 'string' ? errorMessage : String(errorMessage || '');
@@ -4694,6 +5016,20 @@ TASK / CONVERSATION HISTORY:
           if (toolName === 'run_command') {
             return 'Action required: Approve or deny the shell command request to continue.';
           }
+        }
+
+        const runCommandRateLimited =
+          toolName === 'run_command' &&
+          (
+            lower.includes('429') ||
+            lower.includes('too many requests') ||
+            lower.includes('rate limit') ||
+            lower.includes('airdrop limit') ||
+            lower.includes('airdrop faucet has run dry') ||
+            lower.includes('faucet has run dry')
+          );
+        if (runCommandRateLimited) {
+          return 'Action required: External faucet/RPC rate limit is blocking progress. Wait for the reset window or provide a wallet/API endpoint with available funds, then continue.';
         }
 
         return null;
@@ -4886,6 +5222,20 @@ TASK / CONVERSATION HISTORY:
             'Capability upgrade was requested, but the assistant returned a limitation statement without adapting tools or applying a fallback.';
           continueLoop = false;
         }
+        if (
+          assistantText &&
+          assistantText.trim().length > 0 &&
+          !this.capabilityUpgradeRequested &&
+          !responseHasToolUse &&
+          this.isCapabilityRefusal(assistantText) &&
+          !isPlanVerifyStep &&
+          !this.isSummaryStep(step)
+        ) {
+          limitationRefusalWithoutAction = true;
+          lastFailureReason = lastFailureReason ||
+            'Assistant returned a limitation statement without attempting any tool action or fallback.';
+          continueLoop = false;
+        }
         if (response.content) {
           for (const content of response.content) {
             if (content.type === 'text' && content.text) {
@@ -4980,6 +5330,12 @@ TASK / CONVERSATION HISTORY:
               content.name = normalizedTool.name;
             }
 
+            const isExecutionToolCall = this.isExecutionTool(content.name);
+            if (isExecutionToolCall) {
+              stepAttemptedExecutionTool = true;
+              this.executionToolAttemptObserved = true;
+            }
+
             // Check if this tool is disabled (circuit breaker tripped)
             if (this.toolFailureTracker.isDisabled(content.name)) {
               const lastError = this.toolFailureTracker.getLastError(content.name);
@@ -5004,6 +5360,9 @@ TASK / CONVERSATION HISTORY:
               });
               hasDisabledToolAttempt = true;
               hasHardToolFailureAttempt = true;
+              if (isExecutionToolCall) {
+                this.executionToolLastError = `Tool disabled: ${lastError}`;
+              }
               continue;
             }
 
@@ -5065,6 +5424,9 @@ TASK / CONVERSATION HISTORY:
               });
               hasUnavailableToolAttempt = true;
               hasHardToolFailureAttempt = true;
+              if (isExecutionToolCall) {
+                this.executionToolLastError = 'Execution tool not available in current permissions/context.';
+              }
               continue;
             }
 
@@ -5132,6 +5494,9 @@ TASK / CONVERSATION HISTORY:
                 });
                 hasDuplicateToolAttempt = true;
               }
+              if (isExecutionToolCall) {
+                this.executionToolLastError = duplicateCheck.reason || 'Duplicate execution tool call blocked.';
+              }
               continue;
             }
 
@@ -5190,13 +5555,10 @@ TASK / CONVERSATION HISTORY:
             try {
               // Execute tool with timeout to prevent hanging
               const toolTimeoutMs = this.getToolTimeoutMs(content.name, content.input);
-              let result = await withTimeout(
-                this.toolRegistry.executeTool(
-                  content.name,
-                  content.input as any
-                ),
-                toolTimeoutMs,
-                `Tool ${content.name}`
+              let result = await this.executeToolWithHeartbeat(
+                content.name,
+                content.input,
+                toolTimeoutMs
               );
 
               // Fallback: retry grep without glob if the glob produced an invalid regex
@@ -5211,10 +5573,10 @@ TASK / CONVERSATION HISTORY:
                   const fallbackInput = { ...content.input };
                   delete (fallbackInput as any).glob;
                   try {
-                    const fallbackResult = await withTimeout(
-                      this.toolRegistry.executeTool('grep', fallbackInput as any),
-                      toolTimeoutMs,
-                      'Tool grep (fallback)'
+                    const fallbackResult = await this.executeToolWithHeartbeat(
+                      'grep',
+                      fallbackInput,
+                      toolTimeoutMs
                     );
                     if (fallbackResult && fallbackResult.success !== false) {
                       result = fallbackResult;
@@ -5261,6 +5623,9 @@ TASK / CONVERSATION HISTORY:
                 hadToolError = true;
                 toolErrors.add(content.name);
                 lastToolErrorReason = `Tool ${content.name} failed: ${reason}`;
+                if (isExecutionToolCall) {
+                  this.executionToolLastError = reason;
+                }
 
                 const pauseReason = getUserActionRequiredPauseReason(content.name, result.error || reason);
                 if (pauseReason && !pauseAfterNextAssistantMessage) {
@@ -5281,8 +5646,14 @@ TASK / CONVERSATION HISTORY:
                 } else if (isHardFailure) {
                   hasHardToolFailureAttempt = true;
                 }
-              } else if (hadToolError) {
-                hadToolSuccessAfterError = true;
+              } else {
+                if (isExecutionToolCall) {
+                  this.executionToolRunObserved = true;
+                  this.executionToolLastError = '';
+                }
+                if (hadToolError) {
+                  hadToolSuccessAfterError = true;
+                }
               }
 
               // Truncate large tool results to avoid context overflow
@@ -5335,6 +5706,9 @@ TASK / CONVERSATION HISTORY:
               console.error(`Tool execution failed:`, error);
 
               const failureMessage = error?.message || 'Tool execution failed';
+              if (isExecutionToolCall) {
+                this.executionToolLastError = failureMessage;
+              }
 
               hadToolError = true;
               toolErrors.add(content.name);
@@ -5382,8 +5756,6 @@ TASK / CONVERSATION HISTORY:
             content: toolResults,
           });
 
-          // If all tool attempts were for disabled or duplicate tools, don't continue looping
-          // This prevents infinite retry loops
           const allToolsFailed = toolResults.every(r => r.is_error);
           if (hasHardToolFailureAttempt && !lastFailureReason) {
             stepFailed = true;
@@ -5392,14 +5764,57 @@ TASK / CONVERSATION HISTORY:
           const shouldStopFromFailures =
             (hasDisabledToolAttempt || hasDuplicateToolAttempt || hasUnavailableToolAttempt || hasHardToolFailureAttempt)
             && allToolsFailed;
-          const shouldStopFromHardFailure = hasHardToolFailureAttempt;
-          if (shouldStopFromFailures) {
+          const shouldStopFromHardFailure = hasHardToolFailureAttempt && allToolsFailed;
+          const duplicateOnlyFailure =
+            hasDuplicateToolAttempt &&
+            !hasDisabledToolAttempt &&
+            !hasUnavailableToolAttempt &&
+            !hasHardToolFailureAttempt;
+          const pureHardFailure =
+            hasHardToolFailureAttempt &&
+            !hasDisabledToolAttempt &&
+            !hasUnavailableToolAttempt &&
+            !hasDuplicateToolAttempt;
+          const shouldInjectRecoveryHint =
+            allToolsFailed &&
+            !pauseAfterNextAssistantMessage &&
+            !toolRecoveryHintInjected &&
+            iterationCount < maxIterations &&
+            !duplicateOnlyFailure &&
+            !pureHardFailure &&
+            (hasDisabledToolAttempt || hasDuplicateToolAttempt || hasUnavailableToolAttempt);
+
+          if (shouldInjectRecoveryHint) {
+            toolRecoveryHintInjected = true;
+            const errorSummaries = this.extractToolErrorSummaries(toolResults);
+            const recoveryInstruction = this.buildToolRecoveryInstruction({
+              disabled: hasDisabledToolAttempt,
+              duplicate: hasDuplicateToolAttempt,
+              unavailable: hasUnavailableToolAttempt,
+              hardFailure: hasHardToolFailureAttempt,
+              errors: errorSummaries,
+            });
+            this.daemon.logEvent(this.task.id, 'tool_recovery_prompted', {
+              stepId: step.id,
+              disabled: hasDisabledToolAttempt,
+              duplicate: hasDuplicateToolAttempt,
+              unavailable: hasUnavailableToolAttempt,
+              hardFailure: hasHardToolFailureAttempt,
+            });
+            messages.push({
+              role: 'user',
+              content: [{ type: 'text', text: recoveryInstruction }],
+            });
+            continueLoop = true;
+          } else if (shouldStopFromFailures) {
             console.log('[TaskExecutor] All tool calls failed, were disabled, or duplicates - stopping iteration');
             stepFailed = true;
-            lastFailureReason = 'All required tools are unavailable or failed. Unable to complete this step.';
+            lastFailureReason = lastFailureReason || 'All required tools are unavailable or failed. Unable to complete this step.';
             continueLoop = false;
           } else if (shouldStopFromHardFailure) {
             console.log('[TaskExecutor] Hard tool failure detected - stopping iteration');
+            stepFailed = true;
+            lastFailureReason = lastFailureReason || lastToolErrorReason || 'A hard tool failure prevented completion.';
             continueLoop = false;
           } else {
             continueLoop = true;
@@ -5462,6 +5877,30 @@ TASK / CONVERSATION HISTORY:
         }
       }
 
+      if (limitationRefusalWithoutAction && !stepAttemptedToolUse) {
+        stepFailed = true;
+        if (!lastFailureReason) {
+          lastFailureReason =
+            'The step stopped at a limitation statement without attempting tools or fallback.';
+        }
+      }
+
+      if (
+        this.requiresExecutionToolRun &&
+        !this.allowExecutionWithoutShell &&
+        !this.executionToolRunObserved &&
+        isLastStep &&
+        !isPlanVerifyStep &&
+        !isSummaryStep &&
+        !stepAttemptedExecutionTool
+      ) {
+        stepFailed = true;
+        if (!lastFailureReason) {
+          lastFailureReason =
+            'Execution-oriented task finished without attempting run_command/run_applescript. Execute commands directly instead of returning guidance only.';
+        }
+      }
+
       // Step completed or failed
 
       this.recordAssistantOutput(messages, step);
@@ -5485,13 +5924,11 @@ TASK / CONVERSATION HISTORY:
         const isRecoverySignal = this.recoveryRequestActive || this.isRecoveryIntent(lastFailureReason || '');
         const recoverySignature = this.makeRecoveryFailureSignature(step.description, lastFailureReason || '');
         const userRequestedRecovery = !isRecoveryStep && isRecoverySignal;
-        const shouldHandleRecovery = userRequestedRecovery &&
-          !isVerificationStepDescription(step.description) &&
-          this.planRevisionCount < this.maxPlanRevisions &&
+        const autoRecoveryRequested = this.shouldAutoPlanRecovery(step, lastFailureReason || '');
+        const shouldHandleRecovery = (userRequestedRecovery || autoRecoveryRequested) &&
           this.lastRecoveryFailureSignature !== recoverySignature;
 
         if (shouldHandleRecovery) {
-          this.lastRecoveryFailureSignature = recoverySignature;
           const recoverySteps = capabilityRecoveryRequested
             ? [
                 {
@@ -5512,11 +5949,20 @@ TASK / CONVERSATION HISTORY:
                   description: 'If normal tools are blocked, implement the smallest safe code/feature change needed to continue and complete the goal.',
                 },
               ];
-          this.requestPlanRevision(
+          const revisionApplied = this.requestPlanRevision(
             recoverySteps,
             `Recovery attempt: Previous step failed: ${lastFailureReason}`,
             false,
           );
+          if (revisionApplied) {
+            this.lastRecoveryFailureSignature = recoverySignature;
+            this.getRecoveredFailureStepIdSet().add(step.id);
+            this.daemon.logEvent(this.task.id, 'step_recovery_planned', {
+              stepId: step.id,
+              stepDescription: step.description,
+              reason: lastFailureReason,
+            });
+          }
         }
 
         this.daemon.logEvent(this.task.id, 'step_failed', {
@@ -5527,6 +5973,7 @@ TASK / CONVERSATION HISTORY:
         step.status = 'completed';
         step.completedAt = Date.now();
         this.lastRecoveryFailureSignature = '';
+        this.getRecoveredFailureStepIdSet().delete(step.id);
         this.daemon.logEvent(this.task.id, 'step_completed', { step });
       }
     } catch (error: any) {
@@ -5844,6 +6291,48 @@ TASK / CONVERSATION HISTORY:
     this.lastUserMessage = message;
     this.recoveryRequestActive = this.isRecoveryIntent(message);
     this.capabilityUpgradeRequested = this.isCapabilityUpgradeIntent(message);
+
+    if (this.lastPauseReason?.startsWith('shell_permission_')) {
+      const decision = this.classifyShellPermissionDecision(message);
+      if (decision === 'continue_without_shell') {
+        this.allowExecutionWithoutShell = true;
+      } else if (decision === 'enable_shell') {
+        this.allowExecutionWithoutShell = false;
+        if (!this.workspace.permissions.shell) {
+          const refreshedWorkspace = this.daemon.updateWorkspacePermissions(this.workspace.id, { shell: true });
+          const nextWorkspace = refreshedWorkspace ?? {
+            ...this.workspace,
+            permissions: {
+              ...this.workspace.permissions,
+              shell: true,
+            },
+          };
+          this.updateWorkspace(nextWorkspace);
+          this.daemon.logEvent(this.task.id, 'workspace_permissions_updated', {
+            workspaceId: nextWorkspace.id,
+            permissions: nextWorkspace.permissions,
+            workspace: nextWorkspace,
+            source: 'user_enable_shell_message',
+            persisted: Boolean(refreshedWorkspace),
+          });
+          this.daemon.logEvent(this.task.id, 'log', {
+            message: refreshedWorkspace
+              ? `Shell access enabled for workspace "${nextWorkspace.name}" from user confirmation.`
+              : `Shell access enabled in-memory for workspace "${nextWorkspace.name}" after user confirmation (persistence unavailable).`,
+          });
+        }
+      }
+    }
+
+    if (this.preflightShellExecutionCheck()) {
+      this.daemon.logEvent(this.task.id, 'user_message', { message });
+      this.conversationHistory.push({
+        role: 'user',
+        content: message,
+      });
+      return;
+    }
+
     if (shouldResumeAfterFollowup) {
       // If we paused on a workspace preflight gate, treat any user response as acknowledgement.
       // This prevents an infinite pause/resume loop when the user wants to proceed anyway.
@@ -5853,6 +6342,8 @@ TASK / CONVERSATION HISTORY:
       this.task.prompt = `${this.task.prompt}\n\nUSER UPDATE:\n${message}`;
     }
     this.toolRegistry.setCanvasSessionCutoff(shouldStartNewCanvasSession ? Date.now() : null);
+    // Reset deduplicator so follow-up messages can re-invoke tools used in the previous run
+    this.toolCallDeduplicator.reset();
     this.daemon.updateTaskStatus(this.task.id, 'executing');
     this.daemon.logEvent(this.task.id, 'executing', { message: 'Processing follow-up message' });
     this.daemon.logEvent(this.task.id, 'user_message', { message });
@@ -6090,6 +6581,12 @@ TASK / CONVERSATION HISTORY:
     let capabilityRefusalCount = 0;
     const maxIterations = 5;  // Reduced from 10 to prevent excessive iterations
     const maxEmptyResponses = 3;
+    let toolRecoveryHintInjected = false;
+    const requiresExecutionToolProgress =
+      this.followUpRequiresCommandExecution(message) && !this.allowExecutionWithoutShell;
+    let attemptedExecutionTool = false;
+    let successfulExecutionTool = false;
+    let lastExecutionToolError = '';
     let lastTurnMemoryRecallQuery = '';
     let lastTurnMemoryRecallBlock = '';
     let lastSharedContextKey = '';
@@ -6343,6 +6840,12 @@ TASK / CONVERSATION HISTORY:
               content.name = normalizedTool.name;
             }
 
+            const isExecutionToolCall = this.isExecutionTool(content.name);
+            if (isExecutionToolCall) {
+              attemptedExecutionTool = true;
+              this.executionToolAttemptObserved = true;
+            }
+
             // Check if this tool is disabled (circuit breaker tripped)
             if (this.toolFailureTracker.isDisabled(content.name)) {
               const lastError = this.toolFailureTracker.getLastError(content.name);
@@ -6363,6 +6866,10 @@ TASK / CONVERSATION HISTORY:
                 is_error: true,
               });
               hasDisabledToolAttempt = true;
+              if (isExecutionToolCall) {
+                lastExecutionToolError = `Tool disabled: ${lastError}`;
+                this.executionToolLastError = lastExecutionToolError;
+              }
               continue;
             }
 
@@ -6385,6 +6892,10 @@ TASK / CONVERSATION HISTORY:
                 is_error: true,
               });
               hasUnavailableToolAttempt = true;
+              if (isExecutionToolCall) {
+                lastExecutionToolError = 'Execution tool not available in current permissions/context.';
+                this.executionToolLastError = lastExecutionToolError;
+              }
               continue;
             }
 
@@ -6450,6 +6961,10 @@ TASK / CONVERSATION HISTORY:
                 });
                 hasDuplicateToolAttempt = true;
               }
+              if (isExecutionToolCall) {
+                lastExecutionToolError = duplicateCheck.reason || 'Duplicate execution tool call blocked.';
+                this.executionToolLastError = lastExecutionToolError;
+              }
               continue;
             }
 
@@ -6508,13 +7023,10 @@ TASK / CONVERSATION HISTORY:
             try {
               // Execute tool with timeout to prevent hanging
               const toolTimeoutMs = this.getToolTimeoutMs(content.name, content.input);
-              const result = await withTimeout(
-                this.toolRegistry.executeTool(
-                  content.name,
-                  content.input as any
-                ),
-                toolTimeoutMs,
-                `Tool ${content.name}`
+              const result = await this.executeToolWithHeartbeat(
+                content.name,
+                content.input,
+                toolTimeoutMs
               );
 
               // Tool succeeded - reset failure counter
@@ -6530,6 +7042,10 @@ TASK / CONVERSATION HISTORY:
               // Check if the result indicates an error (some tools return error in result)
               if (result && result.success === false) {
                 const reason = this.getToolFailureReason(result, 'unknown error');
+                if (isExecutionToolCall) {
+                  lastExecutionToolError = reason;
+                  this.executionToolLastError = reason;
+                }
                 // Check if this is a non-retryable error
                 const shouldDisable = this.toolFailureTracker.recordFailure(content.name, reason);
                 const isHardFailure = this.isHardToolFailure(content.name, result, reason);
@@ -6543,6 +7059,10 @@ TASK / CONVERSATION HISTORY:
                     disabled: true,
                   });
                 }
+              } else if (isExecutionToolCall) {
+                successfulExecutionTool = true;
+                this.executionToolRunObserved = true;
+                this.executionToolLastError = '';
               }
 
               const truncatedResult = truncateToolResult(resultStr);
@@ -6572,6 +7092,10 @@ TASK / CONVERSATION HISTORY:
               console.error(`Tool execution failed:`, error);
 
               const failureMessage = error?.message || 'Tool execution failed';
+              if (isExecutionToolCall) {
+                lastExecutionToolError = failureMessage;
+                this.executionToolLastError = failureMessage;
+              }
 
               // Track the failure
               const shouldDisable = this.toolFailureTracker.recordFailure(content.name, failureMessage);
@@ -6606,13 +7130,52 @@ TASK / CONVERSATION HISTORY:
             content: toolResults,
           });
 
-          // If all tool attempts were for disabled or duplicate tools, don't continue looping
           const allToolsFailed = toolResults.every(r => r.is_error);
           const shouldStopFromFailures =
             (hasDisabledToolAttempt || hasDuplicateToolAttempt || hasUnavailableToolAttempt || hasHardToolFailureAttempt)
             && allToolsFailed;
-          const shouldStopFromHardFailure = hasHardToolFailureAttempt;
-          if (shouldStopFromFailures) {
+          const shouldStopFromHardFailure = hasHardToolFailureAttempt && allToolsFailed;
+          const duplicateOnlyFailure =
+            hasDuplicateToolAttempt &&
+            !hasDisabledToolAttempt &&
+            !hasUnavailableToolAttempt &&
+            !hasHardToolFailureAttempt;
+          const pureHardFailure =
+            hasHardToolFailureAttempt &&
+            !hasDisabledToolAttempt &&
+            !hasUnavailableToolAttempt &&
+            !hasDuplicateToolAttempt;
+          const shouldInjectRecoveryHint =
+            allToolsFailed &&
+            !toolRecoveryHintInjected &&
+            iterationCount < maxIterations &&
+            !duplicateOnlyFailure &&
+            !pureHardFailure &&
+            (hasDisabledToolAttempt || hasDuplicateToolAttempt || hasUnavailableToolAttempt);
+
+          if (shouldInjectRecoveryHint) {
+            toolRecoveryHintInjected = true;
+            const errorSummaries = this.extractToolErrorSummaries(toolResults);
+            const recoveryInstruction = this.buildToolRecoveryInstruction({
+              disabled: hasDisabledToolAttempt,
+              duplicate: hasDuplicateToolAttempt,
+              unavailable: hasUnavailableToolAttempt,
+              hardFailure: hasHardToolFailureAttempt,
+              errors: errorSummaries,
+            });
+            this.daemon.logEvent(this.task.id, 'tool_recovery_prompted', {
+              disabled: hasDisabledToolAttempt,
+              duplicate: hasDuplicateToolAttempt,
+              unavailable: hasUnavailableToolAttempt,
+              hardFailure: hasHardToolFailureAttempt,
+              followup: true,
+            });
+            messages.push({
+              role: 'user',
+              content: [{ type: 'text', text: recoveryInstruction }],
+            });
+            continueLoop = true;
+          } else if (shouldStopFromFailures) {
             console.log('[TaskExecutor] All tool calls failed, were disabled, or duplicates - stopping iteration');
             continueLoop = false;
           } else if (shouldStopFromHardFailure) {
@@ -6677,6 +7240,22 @@ TASK / CONVERSATION HISTORY:
           wantsToEnd = false;
         }
 
+        if (wantsToEnd && requiresExecutionToolProgress && !successfulExecutionTool) {
+          messages.push({
+            role: 'user',
+            content: [{
+              type: 'text',
+              text: this.buildExecutionRequiredFollowUpInstruction({
+                attemptedExecutionTool,
+                lastExecutionError: lastExecutionToolError,
+                shellEnabled: this.workspace.permissions.shell,
+              }),
+            }],
+          });
+          continueLoop = true;
+          wantsToEnd = false;
+        }
+
         // Only end the loop if the agent wants to AND has provided a response
         if (wantsToEnd && (hasProvidedTextResponse || !hadToolCalls)) {
           continueLoop = false;
@@ -6694,6 +7273,28 @@ TASK / CONVERSATION HISTORY:
           role: 'assistant',
           content: [{ type: 'text', text: maxLoopMessage }],
         });
+      }
+
+      if (!pausedForUserInput && requiresExecutionToolProgress && !successfulExecutionTool) {
+        const shellDisabled = !this.workspace.permissions.shell;
+        const blockerMessage = this.workspace.permissions.shell
+          ? (
+            lastExecutionToolError
+              ? `Execution did not complete. The latest execution blocker was: ${lastExecutionToolError}`
+              : 'Execution did not complete because no command execution tool was used.'
+          )
+          : 'Execution did not complete because shell permission is OFF for this workspace. Enable Shell and rerun to execute commands end-to-end.';
+        this.daemon.logEvent(this.task.id, 'assistant_message', {
+          message: blockerMessage,
+        });
+        messages.push({
+          role: 'assistant',
+          content: [{ type: 'text', text: blockerMessage }],
+        });
+        if (shellDisabled) {
+          this.waitingForUserInput = true;
+          pausedForUserInput = true;
+        }
       }
 
       // Save updated conversation history

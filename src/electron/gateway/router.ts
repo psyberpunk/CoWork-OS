@@ -47,7 +47,6 @@ import * as os from 'os';
 import { LLMProviderFactory, LLMSettings } from '../agent/llm/provider-factory';
 import { LLMProviderType } from '../agent/llm/types';
 import { getCustomSkillLoader } from '../agent/custom-skill-loader';
-import { getVoiceService } from '../voice/VoiceService';
 import { PersonalityManager } from '../settings/personality-manager';
 import { describeSchedule, getCronService, parseIntervalToMs, type CronSchedule } from '../cron';
 import { getUserDataDir } from '../utils/user-data-dir';
@@ -63,51 +62,31 @@ import { formatChatTranscriptForPrompt } from './chat-transcript';
 import { evaluateWorkspaceRouterRules } from './router-rules';
 import { extractJsonValues } from '../utils/json-utils';
 import { pruneTempWorkspaces } from '../utils/temp-workspace';
-
-function getCoworkVersion(): string {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const electron = require('electron') as any;
-    const app = electron?.app;
-    if (typeof app?.getVersion === 'function') {
-      const v = String(app.getVersion() || '').trim();
-      if (v) return v;
-    }
-  } catch {
-    // ignore
-  }
-
-  const env = process.env.npm_package_version;
-  if (typeof env === 'string' && env.trim()) return env.trim();
-
-  try {
-    const raw = fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8');
-    const parsed = JSON.parse(raw) as any;
-    const v = typeof parsed?.version === 'string' ? parsed.version.trim() : '';
-    if (v) return v;
-  } catch {
-    // ignore
-  }
-
-  return 'unknown';
-}
-
-export interface RouterConfig {
-  /** Default workspace ID to use for new sessions */
-  defaultWorkspaceId?: string;
-  /** Welcome message for new users */
-  welcomeMessage?: string;
-  /** Message shown when user is not authorized */
-  unauthorizedMessage?: string;
-  /** Message shown when pairing is required */
-  pairingRequiredMessage?: string;
-}
-
-const DEFAULT_CONFIG: RouterConfig = {
-  welcomeMessage: '👋 Welcome to CoWork! I can help you with tasks in your workspace.',
-  unauthorizedMessage: '⚠️ You are not authorized to use this bot. Please contact the administrator.',
-  pairingRequiredMessage: '🔐 Please enter your pairing code to get started.',
-};
+import {
+  getCoworkVersion,
+  type RouterConfig,
+  DEFAULT_CONFIG,
+  STREAMING_UPDATE_DEBOUNCE_MS,
+  INLINE_ACTION_GUARD_TTL_MS,
+  FEEDBACK_GUARD_TTL_MS,
+  PENDING_FEEDBACK_TTL_MS,
+  BRIEF_CRON_TAG,
+  SCHEDULE_CRON_TAG,
+  sanitizeTempKey,
+  slugify,
+  sanitizePathSegment,
+  sanitizeFilename,
+  guessExtFromMime,
+  toPosixRelPath,
+  transcribeAudioAttachments,
+  extractVoiceTranscriptFromMessageText,
+  formatLocalTimestamp,
+  updatePrioritiesMarkdown,
+  buildBriefPrompt,
+  parseTimeOfDay,
+  parseWeekday,
+} from './router-helpers';
+export type { RouterConfig } from './router-helpers';
 
 export class MessageRouter {
   private adapters: Map<ChannelType, ChannelAdapter> = new Map();
@@ -187,10 +166,6 @@ export class MessageRouter {
   // defensively on pause/follow-up events).
   private telegramDraftStreamTouchedTasks: Set<string> = new Set();
 
-  private static readonly STREAMING_UPDATE_DEBOUNCE_MS = 1200;
-  private static readonly INLINE_ACTION_GUARD_TTL_MS = 10 * 60 * 1000;
-  private static readonly FEEDBACK_GUARD_TTL_MS = 72 * 60 * 60 * 1000;
-  private static readonly PENDING_FEEDBACK_TTL_MS = 10 * 60 * 1000;
 
   constructor(db: Database.Database, config: RouterConfig = {}, agentDaemon?: AgentDaemon) {
     this.db = db;
@@ -336,11 +311,6 @@ export class MessageRouter {
     };
   }
 
-  private static sanitizeTempKey(value: string): string {
-    const safe = value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
-    if (safe.length > 0) return safe.slice(0, 120);
-    return `session-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
-  }
 
   private isPersistedWorkspaceId(workspaceId: string | undefined): boolean {
     if (!workspaceId || isTempWorkspaceId(workspaceId)) return false;
@@ -355,7 +325,7 @@ export class MessageRouter {
   private getOrCreateTempWorkspace(sessionId?: string): Workspace {
     let workspace: Workspace;
     if (sessionId) {
-      const key = MessageRouter.sanitizeTempKey(sessionId);
+      const key = sanitizeTempKey(sessionId);
       const workspaceId = `${TEMP_WORKSPACE_ID_PREFIX}${key}`;
       const existing = this.workspaceRepo.findById(workspaceId);
       if (existing) {
@@ -369,7 +339,7 @@ export class MessageRouter {
       if (existingTemp) {
         workspace = this.ensureTempWorkspaceRecord(existingTemp.id, existingTemp.path, existingTemp);
       } else {
-        const key = MessageRouter.sanitizeTempKey(`session-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`);
+        const key = sanitizeTempKey(`session-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`);
         const workspaceId = `${TEMP_WORKSPACE_ID_PREFIX}${key}`;
         const workspacePath = path.join(os.tmpdir(), TEMP_WORKSPACE_ROOT_DIR_NAME, key);
         workspace = this.ensureTempWorkspaceRecord(workspaceId, workspacePath);
@@ -389,20 +359,12 @@ export class MessageRouter {
     return workspace;
   }
 
-  private static slugify(value: string): string {
-    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
-    const slug = normalized
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+/, '')
-      .replace(/-+$/, '');
-    return slug.length > 0 ? slug.slice(0, 60) : 'scheduled-task';
-  }
 
   private createDedicatedWorkspaceForScheduledJob(jobName: string): Workspace {
     const root = path.join(getUserDataDir(), 'scheduled-workspaces');
     fs.mkdirSync(root, { recursive: true });
 
-    const slug = MessageRouter.slugify(jobName);
+    const slug = slugify(jobName);
     const dirName = `${slug}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
     const jobDir = path.join(root, dirName);
     fs.mkdirSync(jobDir, { recursive: true });
@@ -567,7 +529,7 @@ export class MessageRouter {
     requestingUserId: string;
     requestingUserName?: string;
   }): void {
-    const expiresAt = Date.now() + MessageRouter.INLINE_ACTION_GUARD_TTL_MS;
+    const expiresAt = Date.now() + INLINE_ACTION_GUARD_TTL_MS;
     const key = this.makeInlineActionGuardKey(params.channelType, params.chatId, params.messageId);
     const entry = {
       ...params,
@@ -581,7 +543,7 @@ export class MessageRouter {
       if (existing && existing.expiresAt === expiresAt) {
         this.pendingInlineActionGuards.delete(key);
       }
-    }, MessageRouter.INLINE_ACTION_GUARD_TTL_MS + 500);
+    }, INLINE_ACTION_GUARD_TTL_MS + 500);
   }
 
   private registerFeedbackRequest(params: {
@@ -594,7 +556,7 @@ export class MessageRouter {
     requestingUserName?: string;
     contextType: 'dm' | 'group';
   }): void {
-    const expiresAt = Date.now() + MessageRouter.FEEDBACK_GUARD_TTL_MS;
+    const expiresAt = Date.now() + FEEDBACK_GUARD_TTL_MS;
     const key = this.makeInlineActionGuardKey(params.channelType, params.chatId, params.messageId);
     this.pendingFeedbackRequests.set(key, { ...params, expiresAt });
 
@@ -604,7 +566,7 @@ export class MessageRouter {
       if (existing && existing.expiresAt === expiresAt) {
         this.pendingFeedbackRequests.delete(key);
       }
-    }, MessageRouter.FEEDBACK_GUARD_TTL_MS + 500);
+    }, FEEDBACK_GUARD_TTL_MS + 500);
   }
 
   private buildFeedbackKeyboard(): InlineKeyboardButton[][] {
@@ -812,46 +774,6 @@ export class MessageRouter {
     return safe.length > 0 ? safe : undefined;
   }
 
-  private sanitizePathSegment(raw: string, maxLen = 80): string {
-    const cleaned = String(raw || '')
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9._-]+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .slice(0, maxLen);
-    return cleaned || 'unknown';
-  }
-
-  private sanitizeFilename(raw: string, maxLen = 120): string {
-    const base = path.basename(String(raw || '').trim() || 'attachment');
-    const cleaned = base
-      .replace(/[^a-zA-Z0-9._-]+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .slice(0, maxLen);
-    return cleaned || 'attachment';
-  }
-
-  private guessExtFromMime(mimeType?: string): string {
-    const mime = (mimeType || '').toLowerCase();
-    if (mime === 'image/png') return '.png';
-    if (mime === 'image/jpeg') return '.jpg';
-    if (mime === 'image/webp') return '.webp';
-    if (mime === 'image/gif') return '.gif';
-    if (mime === 'image/bmp') return '.bmp';
-    if (mime === 'audio/mpeg') return '.mp3';
-    if (mime === 'audio/ogg') return '.ogg';
-    if (mime === 'audio/wav') return '.wav';
-    if (mime === 'video/mp4') return '.mp4';
-    if (mime === 'application/pdf') return '.pdf';
-    if (mime === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') return '.pptx';
-    if (mime === 'application/vnd.ms-powerpoint') return '.ppt';
-    return '';
-  }
-
-  private toPosixRelPath(workspacePath: string, absPath: string): string {
-    const rel = path.relative(workspacePath, absPath);
-    return rel.split(path.sep).join('/');
-  }
 
   private async persistInboundAttachments(
     channelType: ChannelType,
@@ -863,8 +785,8 @@ export class MessageRouter {
 
     const now = new Date();
     const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const safeChatId = this.sanitizePathSegment(message.chatId, 120);
-    const safeMessageId = this.sanitizePathSegment(message.messageId, 120);
+    const safeChatId = sanitizePathSegment(message.chatId, 120);
+    const safeMessageId = sanitizePathSegment(message.messageId, 120);
 
     const baseDirAbs = path.join(
       workspace.path,
@@ -891,15 +813,15 @@ export class MessageRouter {
       const att = attachments[i];
       const type = typeof att?.type === 'string' ? att.type : 'file';
       const mimeType = typeof att?.mimeType === 'string' ? att.mimeType : undefined;
-      const ext = path.extname(att?.fileName || '') || path.extname(att?.url || '') || this.guessExtFromMime(mimeType);
+      const ext = path.extname(att?.fileName || '') || path.extname(att?.url || '') || guessExtFromMime(mimeType);
       const baseNameCandidate = att?.fileName || (att?.url ? path.basename(att.url.replace('file://', '')) : '') || `${type}-${i + 1}${ext || ''}`;
-      let fileName = this.sanitizeFilename(baseNameCandidate);
+      let fileName = sanitizeFilename(baseNameCandidate);
 
       if (!path.extname(fileName) && ext) {
         fileName += ext;
       }
       if (!path.extname(fileName) && mimeType) {
-        const guessed = this.guessExtFromMime(mimeType);
+        const guessed = guessExtFromMime(mimeType);
         if (guessed) fileName += guessed;
       }
 
@@ -921,7 +843,7 @@ export class MessageRouter {
           saved.push({
             type,
             absPath: destAbs,
-            relPath: this.toPosixRelPath(workspace.path, destAbs),
+            relPath: toPosixRelPath(workspace.path, destAbs),
             mimeType,
           });
           continue;
@@ -937,7 +859,7 @@ export class MessageRouter {
           saved.push({
             type,
             absPath: destAbs,
-            relPath: this.toPosixRelPath(workspace.path, destAbs),
+            relPath: toPosixRelPath(workspace.path, destAbs),
             mimeType,
           });
           continue;
@@ -974,7 +896,7 @@ export class MessageRouter {
             saved.push({
               type,
               absPath: destAbs,
-              relPath: this.toPosixRelPath(workspace.path, destAbs),
+              relPath: toPosixRelPath(workspace.path, destAbs),
               mimeType: mimeType || res.headers.get('content-type') || undefined,
             });
           } finally {
@@ -989,258 +911,7 @@ export class MessageRouter {
     return saved;
   }
 
-  /**
-   * Transcribe audio attachments in a message
-   * Downloads audio from URL or uses buffer, transcribes via VoiceService
-   * Saves audio file to a temp folder for transcription and sets message text to include full transcript with context
-   */
-  private async transcribeAudioAttachments(message: IncomingMessage, workspacePath?: string): Promise<void> {
-    if (!message.attachments || message.attachments.length === 0) {
-      return;
-    }
 
-    const audioAttachments = message.attachments.filter(a => a.type === 'audio');
-    if (audioAttachments.length === 0) {
-      return;
-    }
-
-    const voiceService = getVoiceService();
-
-    // Check if transcription is available
-    if (!voiceService.isTranscriptionAvailable()) {
-      console.log('[Router] Audio transcription not available - no STT provider configured');
-      // Add placeholder for audio messages
-      for (const attachment of audioAttachments) {
-        const fileName = attachment.fileName || 'voice message';
-        message.text += message.text ? `\n[Audio: ${fileName} - transcription unavailable]` : `[Audio: ${fileName} - transcription unavailable]`;
-      }
-      return;
-    }
-
-    console.log(`[Router] Transcribing ${audioAttachments.length} audio attachment(s)...`);
-
-    for (const attachment of audioAttachments) {
-      let savedAudioPath: string | undefined;
-      try {
-        let audioBuffer: Buffer | undefined;
-
-        // Get audio data from buffer or file
-        if (attachment.data) {
-          audioBuffer = attachment.data;
-        } else if (attachment.url) {
-          // Check if it's a local file path
-          if (attachment.url.startsWith('/') || attachment.url.startsWith('file://')) {
-            const filePath = attachment.url.replace('file://', '');
-            if (fs.existsSync(filePath)) {
-              audioBuffer = fs.readFileSync(filePath);
-            }
-          } else if (attachment.url.startsWith('http')) {
-            // Download from URL
-            try {
-              const response = await fetch(attachment.url);
-              if (response.ok) {
-                const arrayBuffer = await response.arrayBuffer();
-                audioBuffer = Buffer.from(arrayBuffer);
-              }
-            } catch (fetchError) {
-              console.error('[Router] Failed to download audio:', fetchError);
-            }
-          }
-        }
-
-        if (!audioBuffer || audioBuffer.length === 0) {
-          console.log('[Router] No audio data available for transcription');
-          const fileName = attachment.fileName || 'voice message';
-          message.text += message.text ? `\n[Audio: ${fileName} - could not load]` : `[Audio: ${fileName} - could not load]`;
-          continue;
-        }
-
-        // Save audio file to temp directory for transcription
-        try {
-          const tempDir = path.join(os.tmpdir(), 'cowork-audio');
-          if (!fs.existsSync(tempDir)) {
-            fs.mkdirSync(tempDir, { recursive: true });
-          }
-          const audioFileName = attachment.fileName || `voice_message_${Date.now()}.ogg`;
-          savedAudioPath = path.join(tempDir, audioFileName);
-          fs.writeFileSync(savedAudioPath, audioBuffer);
-          console.log(`[Router] Saved audio file to: ${savedAudioPath}`);
-        } catch (saveError) {
-          console.error('[Router] Failed to save audio file:', saveError);
-        }
-
-        // Transcribe the audio
-        const transcript = await voiceService.transcribe(audioBuffer, { force: true });
-
-        if (transcript && transcript.trim()) {
-          console.log(`[Router] Transcribed audio: "${transcript.substring(0, 100)}${transcript.length > 100 ? '...' : ''}"`);
-
-          // Create a structured message with the full transcript
-          // This ensures the agent knows it's a voice message and has the complete transcript
-          const voiceMessageContext = [
-            '📢 **Voice Message Received**',
-            '',
-            'The user sent a voice message. Here is the complete transcription:',
-            '',
-            '---',
-            transcript,
-            '---',
-            '',
-            'Please respond to the user\'s voice message above.',
-          ].filter(line => line !== undefined).join('\n');
-
-          // Append or set the transcribed text with context
-          if (message.text && message.text.trim()) {
-            message.text += `\n\n${voiceMessageContext}`;
-          } else {
-            message.text = voiceMessageContext;
-          }
-        } else {
-          const fileName = attachment.fileName || 'voice message';
-          message.text += message.text ? `\n[Audio: ${fileName} - no speech detected]` : `[Audio: ${fileName} - no speech detected]`;
-        }
-      } catch (error) {
-        console.error('[Router] Failed to transcribe audio:', error);
-        const fileName = attachment.fileName || 'voice message';
-        message.text += message.text ? `\n[Audio: ${fileName} - transcription failed]` : `[Audio: ${fileName} - transcription failed]`;
-      } finally {
-        if (savedAudioPath && fs.existsSync(savedAudioPath)) {
-          try {
-            fs.unlinkSync(savedAudioPath);
-          } catch (cleanupError) {
-            console.error('[Router] Failed to delete temp audio file:', cleanupError);
-          }
-        }
-      }
-    }
-  }
-
-  private extractVoiceTranscriptFromMessageText(text: string): string | null {
-    const raw = String(text || '');
-    if (!raw) return null;
-    const match = raw.match(/Voice Message Received[\s\S]*?\n---\n([\s\S]*?)\n---/i);
-    if (match && match[1] && String(match[1]).trim()) {
-      return String(match[1]).trim();
-    }
-    return null;
-  }
-
-  private formatLocalTimestamp(now: Date): string {
-    const yyyy = String(now.getFullYear());
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    const hh = String(now.getHours()).padStart(2, '0');
-    const min = String(now.getMinutes()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
-  }
-
-  private updatePrioritiesMarkdown(
-    markdown: string,
-    extracted: {
-      priorities?: string[];
-      decisions?: string[];
-      actionItems?: string[];
-      contextShifts?: string[];
-    },
-    timestamp: string
-  ): string {
-    const lines = String(markdown || '').split('\n');
-    const sanitize = (s: string) =>
-      String(s || '')
-        .replace(/[\r\n\t]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    const clean = (s: string) => {
-      const trimmed = sanitize(s).replace(/^[-*]\s+/, '').trim();
-      return trimmed.length > 220 ? trimmed.slice(0, 217) + '...' : trimmed;
-    };
-
-    const incomingPriorities = (extracted.priorities || [])
-      .map((p) => clean(p))
-      .filter((p) => p.length > 0)
-      .slice(0, 8);
-
-    const incomingDecisions = (extracted.decisions || [])
-      .map((p) => clean(p))
-      .filter((p) => p.length > 0)
-      .slice(0, 8);
-    const incomingActionItems = (extracted.actionItems || [])
-      .map((p) => clean(p))
-      .filter((p) => p.length > 0)
-      .slice(0, 8);
-    const incomingContextShifts = (extracted.contextShifts || [])
-      .map((p) => clean(p))
-      .filter((p) => p.length > 0)
-      .slice(0, 8);
-
-    const hasAnyIncoming =
-      incomingPriorities.length > 0
-      || incomingDecisions.length > 0
-      || incomingActionItems.length > 0
-      || incomingContextShifts.length > 0;
-
-    if (!hasAnyIncoming) return markdown;
-
-    const idxCurrent = lines.findIndex((l) => /^##\s+Current\s*$/.test(l));
-    if (idxCurrent >= 0 && incomingPriorities.length > 0) {
-      let idxEnd = lines.length;
-      for (let i = idxCurrent + 1; i < lines.length; i++) {
-        if (/^##\s+/.test(lines[i])) {
-          idxEnd = i;
-          break;
-        }
-      }
-
-      const existingItems: string[] = [];
-      for (let i = idxCurrent + 1; i < idxEnd; i++) {
-        const m = lines[i].match(/^\s*\d+\.\s*(.*)$/);
-        if (m) {
-          const v = clean(m[1] || '');
-          if (v) existingItems.push(v);
-        }
-      }
-
-      const seen = new Set<string>();
-      const merged: string[] = [];
-      for (const p of [...incomingPriorities, ...existingItems]) {
-        const key = p.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        merged.push(p);
-        if (merged.length >= 5) break;
-      }
-
-      const rendered: string[] = [];
-      const count = Math.max(3, merged.length);
-      for (let i = 0; i < count; i++) {
-        rendered.push(`${i + 1}. ${merged[i] || ''}`.trimEnd());
-      }
-
-      lines.splice(idxCurrent + 1, idxEnd - (idxCurrent + 1), ...rendered, '');
-    }
-
-    const idxHistory = lines.findIndex((l) => /^##\s+History\s*$/.test(l));
-    if (idxHistory >= 0) {
-      const entryLines: string[] = [];
-      entryLines.push(`### ${timestamp}`);
-      if (incomingPriorities.length > 0) {
-        entryLines.push(`- Priorities: ${incomingPriorities.join(' | ')}`);
-      }
-      if (incomingDecisions.length > 0) {
-        entryLines.push(`- Decisions: ${incomingDecisions.join(' | ')}`);
-      }
-      if (incomingActionItems.length > 0) {
-        entryLines.push(`- Action Items: ${incomingActionItems.join(' | ')}`);
-      }
-      if (incomingContextShifts.length > 0) {
-        entryLines.push(`- Context Shifts: ${incomingContextShifts.join(' | ')}`);
-      }
-      entryLines.push('');
-      lines.splice(idxHistory + 1, 0, ...entryLines);
-    }
-
-    return lines.join('\n').replace(/\n{4,}/g, '\n\n\n').trimEnd() + '\n';
-  }
 
   private async maybeUpdatePrioritiesFromVoiceMessage(params: {
     message: IncomingMessage;
@@ -1253,7 +924,7 @@ export class MessageRouter {
       && params.message.attachments.some((a) => a?.type === 'audio');
     if (!hasAudio) return;
 
-    const transcript = this.extractVoiceTranscriptFromMessageText(params.message.text);
+    const transcript = extractVoiceTranscriptFromMessageText(params.message.text);
     if (!transcript) return;
 
     const prioritiesPath = path.join(params.workspace.path, '.cowork', 'PRIORITIES.md');
@@ -1353,7 +1024,7 @@ export class MessageRouter {
 
     try {
       const current = fs.readFileSync(prioritiesPath, 'utf8');
-      const next = this.updatePrioritiesMarkdown(
+      const next = updatePrioritiesMarkdown(
         current,
         {
           priorities: extractedPriorities,
@@ -1361,7 +1032,7 @@ export class MessageRouter {
           actionItems: extractedActionItems,
           contextShifts: extractedContextShifts,
         },
-        this.formatLocalTimestamp(new Date())
+        formatLocalTimestamp(new Date())
       );
       if (next !== current) {
         const tmp = prioritiesPath + '.tmp';
@@ -1397,7 +1068,7 @@ export class MessageRouter {
 
     // Transcribe any audio attachments before processing (authorized only)
     if (securityResult.allowed && !ingestOnly) {
-      await this.transcribeAudioAttachments(message);
+      await transcribeAudioAttachments(message);
     }
 
     // Log incoming message (include resolved user row + sanitized attachment metadata)
@@ -1443,11 +1114,15 @@ export class MessageRouter {
     }
 
     // Get or create session
+    // Channel-level workspace override takes priority over router default
+    const channelDefaultWorkspaceId = typeof channel.config?.defaultWorkspaceId === 'string'
+      ? channel.config.defaultWorkspaceId
+      : undefined;
     const session = await this.sessionManager.getOrCreateSession(
       channel,
       message.chatId,
       securityResult.user?.id,
-      this.config.defaultWorkspaceId
+      channelDefaultWorkspaceId || this.config.defaultWorkspaceId
     );
 
     // Track last sender for this chat (useful for restoring after restarts).
@@ -1553,7 +1228,7 @@ export class MessageRouter {
       const requestingUserId = typeof pendingFeedback.requestingUserId === 'string' ? pendingFeedback.requestingUserId : '';
       const ageMs = Date.now() - createdAt;
 
-      if (!kind || !taskId || ageMs > MessageRouter.PENDING_FEEDBACK_TTL_MS) {
+      if (!kind || !taskId || ageMs > PENDING_FEEDBACK_TTL_MS) {
         this.sessionManager.updateSessionContext(sessionId, { pendingFeedback: undefined });
       } else if (requestingUserId && requestingUserId !== message.userId) {
         // In group chats, only the user who initiated the feedback flow can continue it.
@@ -1829,6 +1504,20 @@ export class MessageRouter {
               }
             }
           }
+          if (ruleResult.action === 'set_agent') {
+            // Route to a specific agent role (and optionally a workspace)
+            if (!securityContext) securityContext = {};
+            (securityContext as any).agentRoleId = ruleResult.agentRoleId;
+            if (ruleResult.workspaceId) {
+              const nextWs = this.workspaceRepo.findById(ruleResult.workspaceId);
+              if (nextWs) {
+                this.sessionManager.setSessionWorkspace(sessionId, nextWs.id);
+              }
+            }
+            if (typeof ruleResult.text === 'string' && ruleResult.text.trim().length > 0) {
+              message.text = ruleResult.text;
+            }
+          }
         }
       }
     } catch (error) {
@@ -2088,7 +1777,7 @@ export class MessageRouter {
       return;
     }
 
-    const prompt = this.buildBriefPrompt(mode as any);
+    const prompt = buildBriefPrompt(mode as any);
 
     const synthetic: IncomingMessage = {
       ...message,
@@ -2099,56 +1788,7 @@ export class MessageRouter {
     await this.forwardToDesktopApp(adapter, synthetic, sessionId, securityContext);
   }
 
-  private static readonly BRIEF_CRON_TAG = 'cowork_brief_v1';
-  private static readonly SCHEDULE_CRON_TAG = 'cowork_schedule_v1';
 
-  private buildBriefPrompt(mode: 'today' | 'tomorrow' | 'week', opts?: { templateForCron?: boolean }): string {
-    const templateForCron = opts?.templateForCron === true;
-
-    const formatLocalYmd = (d: Date): string =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-    const now = new Date();
-    const today = formatLocalYmd(now);
-    const tomorrowDate = new Date(now);
-    tomorrowDate.setDate(now.getDate() + 1);
-    const tomorrow = formatLocalYmd(tomorrowDate);
-    const weekEndDate = new Date(now);
-    weekEndDate.setDate(now.getDate() + 6);
-    const weekEnd = formatLocalYmd(weekEndDate);
-
-    const rangeText = templateForCron
-      ? (mode === 'today'
-        ? 'Date: {{today}}'
-        : mode === 'tomorrow'
-          ? 'Date: {{tomorrow}}'
-          : 'Range: {{today}} to {{week_end}}')
-      : (mode === 'today'
-        ? `Date: ${today}`
-        : mode === 'tomorrow'
-          ? `Date: ${tomorrow}`
-          : `Range: ${today} to ${weekEnd}`);
-
-    return [
-      'Generate a concise personal brief.',
-      '',
-      `Timeframe: ${mode}`,
-      rangeText,
-      '',
-      'Include sections:',
-      '- Calendar: upcoming events in this timeframe (times, locations if available, conflicts).',
-      '- Inbox: important new messages/emails that likely need action.',
-      '- Reminders / tasks: anything due soon.',
-      '- Suggested next actions: 3-7 bullet items, ordered by urgency.',
-      '',
-      'Data sources (use what is available):',
-      '- Prefer calendar_action + gmail_action if configured. If calendar_action is unavailable and you are on macOS, use apple_calendar_action for Apple Calendar.',
-      '- If gmail_action is unavailable, use email_imap_unread if available; otherwise use the Email channel message log via channel_list_chats/channel_history.',
-      '- If Apple Reminders is available on this machine, use apple_reminders_action to include relevant reminders; otherwise skip reminders.',
-      '',
-      'Output should be readable on mobile. Use short bullets, no long paragraphs.',
-    ].join('\n');
-  }
 
   /**
    * Start an isolated one-shot task that should NOT attach to the session's current task.
@@ -2534,51 +2174,6 @@ export class MessageRouter {
     );
   }
 
-  private parseTimeOfDay(input: string): { hour: number; minute: number } | null {
-    const raw = (input || '').trim().toLowerCase();
-    if (!raw) return null;
-
-    const match = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
-    if (!match) return null;
-
-    const hRaw = parseInt(match[1], 10);
-    const mRaw = match[2] ? parseInt(match[2], 10) : 0;
-    const meridiem = match[3]?.toLowerCase();
-
-    if (!Number.isFinite(hRaw) || !Number.isFinite(mRaw)) return null;
-    if (mRaw < 0 || mRaw > 59) return null;
-
-    let hour = hRaw;
-    const minute = mRaw;
-
-    if (meridiem) {
-      if (hour < 1 || hour > 12) return null;
-      if (meridiem === 'am') {
-        if (hour === 12) hour = 0;
-      } else if (meridiem === 'pm') {
-        if (hour !== 12) hour += 12;
-      }
-    } else {
-      if (hour < 0 || hour > 23) return null;
-    }
-
-    return { hour, minute };
-  }
-
-  private parseWeekday(input: string): number | null {
-    const raw = (input || '').trim().toLowerCase();
-    if (!raw) return null;
-    const map: Record<string, number> = {
-      sun: 0, sunday: 0,
-      mon: 1, monday: 1,
-      tue: 2, tues: 2, tuesday: 2,
-      wed: 3, wednesday: 3,
-      thu: 4, thur: 4, thurs: 4, thursday: 4,
-      fri: 5, friday: 5,
-      sat: 6, saturday: 6,
-    };
-    return Object.prototype.hasOwnProperty.call(map, raw) ? map[raw] : null;
-  }
 
   private async handleBriefScheduleCommand(
     adapter: ChannelAdapter,
@@ -2630,7 +2225,7 @@ export class MessageRouter {
     let schedule: CronSchedule | null = null;
 
     if (scheduleKind === 'daily' || scheduleKind === 'weekdays') {
-      const time = this.parseTimeOfDay(rest[1] || '');
+      const time = parseTimeOfDay(rest[1] || '');
       if (!time) {
         await adapter.sendMessage({
           chatId: message.chatId,
@@ -2644,8 +2239,8 @@ export class MessageRouter {
         : `${time.minute} ${time.hour} * * *`;
       schedule = { kind: 'cron', expr };
     } else if (scheduleKind === 'weekly') {
-      const dow = this.parseWeekday(rest[1] || '');
-      const time = this.parseTimeOfDay(rest[2] || '');
+      const dow = parseWeekday(rest[1] || '');
+      const time = parseTimeOfDay(rest[2] || '');
       if (dow === null || !time) {
         await adapter.sendMessage({
           chatId: message.chatId,
@@ -2686,15 +2281,15 @@ export class MessageRouter {
       summaryOnly: false,
     };
 
-    const prompt = this.buildBriefPrompt(mode, { templateForCron: true });
+    const prompt = buildBriefPrompt(mode, { templateForCron: true });
     const jobName = `Brief (${mode})`;
-    const description = `${MessageRouter.BRIEF_CRON_TAG} mode=${mode}`;
+    const description = `${BRIEF_CRON_TAG} mode=${mode}`;
 
     // Prefer updating an existing schedule for this chat+mode.
     const existingJobs = (await cronService.list({ includeDisabled: true }))
       .filter((job) =>
         typeof job.description === 'string' &&
-        job.description.includes(MessageRouter.BRIEF_CRON_TAG) &&
+        job.description.includes(BRIEF_CRON_TAG) &&
         job.description.includes(`mode=${mode}`) &&
         job.delivery?.enabled &&
         job.delivery.channelType === adapter.type &&
@@ -2770,7 +2365,7 @@ export class MessageRouter {
     const jobs = (await cronService.list({ includeDisabled: true }))
       .filter((job) =>
         typeof job.description === 'string' &&
-        job.description.includes(MessageRouter.BRIEF_CRON_TAG) &&
+        job.description.includes(BRIEF_CRON_TAG) &&
         job.delivery?.enabled &&
         job.delivery.channelType === adapter.type &&
         job.delivery.channelId === message.chatId
@@ -2820,7 +2415,7 @@ export class MessageRouter {
     const jobs = (await cronService.list({ includeDisabled: true }))
       .filter((job) =>
         typeof job.description === 'string' &&
-        job.description.includes(MessageRouter.BRIEF_CRON_TAG) &&
+        job.description.includes(BRIEF_CRON_TAG) &&
         job.delivery?.enabled &&
         job.delivery.channelType === adapter.type &&
         job.delivery.channelId === message.chatId
@@ -2931,7 +2526,7 @@ export class MessageRouter {
     let sourceChannelType: ChannelType | undefined;
 
     if (scheduleKind === 'daily' || scheduleKind === 'weekdays') {
-      const time = this.parseTimeOfDay(rest[0] || '');
+      const time = parseTimeOfDay(rest[0] || '');
       if (!time) {
         await adapter.sendMessage({
           chatId: message.chatId,
@@ -2946,8 +2541,8 @@ export class MessageRouter {
       schedule = { kind: 'cron', expr };
       promptParts = rest.slice(1);
     } else if (scheduleKind === 'weekly') {
-      const dow = this.parseWeekday(rest[0] || '');
-      const time = this.parseTimeOfDay(rest[1] || '');
+      const dow = parseWeekday(rest[0] || '');
+      const time = parseTimeOfDay(rest[1] || '');
       if (dow === null || !time) {
         await adapter.sendMessage({
           chatId: message.chatId,
@@ -3115,13 +2710,13 @@ export class MessageRouter {
       : undefined;
 
     const name = prompt.length > 48 ? `${prompt.slice(0, 48).trim()}...` : prompt;
-    const description = `${MessageRouter.SCHEDULE_CRON_TAG} channel=${adapter.type} chat=${message.chatId}`;
+    const description = `${SCHEDULE_CRON_TAG} channel=${adapter.type} chat=${message.chatId}`;
 
     // Update existing job with same name for this chat (best-effort), otherwise create.
     const existingJobs = (await cronService.list({ includeDisabled: true }))
       .filter((job) =>
         typeof job.description === 'string' &&
-        job.description.includes(MessageRouter.SCHEDULE_CRON_TAG) &&
+        job.description.includes(SCHEDULE_CRON_TAG) &&
         job.delivery?.enabled &&
         job.delivery.channelType === adapter.type &&
         job.delivery.channelId === message.chatId &&
@@ -3196,7 +2791,7 @@ export class MessageRouter {
     return jobs
       .filter((job) =>
         typeof job.description === 'string' &&
-        job.description.includes(MessageRouter.SCHEDULE_CRON_TAG) &&
+        job.description.includes(SCHEDULE_CRON_TAG) &&
         job.delivery?.enabled &&
         job.delivery.channelType === adapter.type &&
         job.delivery.channelId === chatId
@@ -4295,7 +3890,7 @@ export class MessageRouter {
     adapter: ChannelAdapter,
     message: IncomingMessage,
     sessionId: string,
-    securityContext?: { contextType?: 'dm' | 'group'; deniedTools?: string[] }
+    securityContext?: { contextType?: 'dm' | 'group'; deniedTools?: string[]; agentRoleId?: string }
   ): Promise<void> {
     let session = this.sessionRepo.findById(sessionId);
 
@@ -4431,6 +4026,11 @@ export class MessageRouter {
     const gatewayContext = contextType === 'group' ? 'group' : 'private';
     const toolRestrictions = securityContext?.deniedTools?.filter((t) => typeof t === 'string' && t.trim().length > 0);
 
+    // Resolve agent role: router rule > channel config > none
+    const routedChannel = this.channelRepo.findByType(adapter.type);
+    const resolvedAgentRoleId = securityContext?.agentRoleId
+      || (typeof routedChannel?.config?.defaultAgentRoleId === 'string' ? routedChannel.config.defaultAgentRoleId : undefined);
+
     const task = this.taskRepo.create({
       workspaceId: workspace.id,
       title: taskTitle,
@@ -4441,6 +4041,12 @@ export class MessageRouter {
         ...(toolRestrictions && toolRestrictions.length > 0 ? { toolRestrictions } : {}),
       },
     });
+
+    // Apply agent role assignment if resolved from router rules or channel config
+    if (resolvedAgentRoleId) {
+      this.taskRepo.update(task.id, { assignedAgentRoleId: resolvedAgentRoleId } as any);
+      (task as any).assignedAgentRoleId = resolvedAgentRoleId;
+    }
 
     // Link session to task
     this.sessionManager.linkSessionToTask(sessionId, task.id);
@@ -4591,7 +4197,7 @@ export class MessageRouter {
         if (!existing.timeoutHandle) {
           const now = Date.now();
           const sinceLast = now - existing.lastSentAt;
-          const delay = Math.max(0, MessageRouter.STREAMING_UPDATE_DEBOUNCE_MS - sinceLast);
+          const delay = Math.max(0, STREAMING_UPDATE_DEBOUNCE_MS - sinceLast);
 
           existing.timeoutHandle = setTimeout(() => {
             const buffer = this.streamingUpdateBuffers.get(taskId);

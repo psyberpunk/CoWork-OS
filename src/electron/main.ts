@@ -48,6 +48,7 @@ import { getUserDataDir } from './utils/user-data-dir';
 import { registerCanvasScheme, registerCanvasProtocol, CanvasManager } from './canvas';
 import { setupCanvasHandlers, cleanupCanvasHandlers } from './ipc/canvas-handlers';
 import { pruneTempWorkspaces } from './utils/temp-workspace';
+import { getPluginRegistry } from './extensions/registry';
 
 let mainWindow: BrowserWindow | null = null;
 let dbManager: DatabaseManager;
@@ -556,6 +557,16 @@ app.whenReady().then(async () => {
   } catch (error) {
     console.error('[Main] Failed to initialize Cron Service:', error);
     // Don't fail app startup if cron init fails
+  }
+
+  // Initialize extension/plugin system — auto-discovers and loads plugins
+  try {
+    const pluginRegistry = getPluginRegistry();
+    await pluginRegistry.initialize();
+    console.log(`[Main] Plugin registry initialized (${pluginRegistry.getPlugins().length} plugins)`);
+  } catch (error) {
+    console.error('[Main] Failed to initialize Plugin Registry:', error);
+    // Don't fail app startup if plugin init fails
   }
 
   // Initialize channel gateway with agent daemon for task processing

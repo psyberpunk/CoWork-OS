@@ -6,7 +6,7 @@
  */
 
 import { ipcMain, BrowserWindow } from 'electron';
-import { IPC_CHANNELS, CanvasSession, CanvasA2UIAction } from '../../shared/types';
+import { IPC_CHANNELS, CanvasSession, CanvasA2UIAction, CanvasCheckpoint } from '../../shared/types';
 import { CanvasManager } from '../canvas/canvas-manager';
 import { AgentDaemon } from '../agent/daemon';
 
@@ -140,6 +140,51 @@ export function setupCanvasHandlers(
   // Get session directory
   ipcMain.handle(IPC_CHANNELS.CANVAS_GET_SESSION_DIR, async (_, sessionId: string): Promise<string | null> => {
     return manager.getSessionDir(sessionId);
+  });
+
+  // Save a checkpoint
+  ipcMain.handle(IPC_CHANNELS.CANVAS_CHECKPOINT_SAVE, async (_, data: {
+    sessionId: string;
+    label?: string;
+  }): Promise<{ id: string; label: string; createdAt: number }> => {
+    const cp = await manager.saveCheckpoint(data.sessionId, data.label);
+    return { id: cp.id, label: cp.label, createdAt: cp.createdAt };
+  });
+
+  // List checkpoints
+  ipcMain.handle(IPC_CHANNELS.CANVAS_CHECKPOINT_LIST, async (_, sessionId: string): Promise<Array<{
+    id: string;
+    label: string;
+    createdAt: number;
+  }>> => {
+    return manager.listCheckpoints(sessionId).map((cp) => ({
+      id: cp.id,
+      label: cp.label,
+      createdAt: cp.createdAt,
+    }));
+  });
+
+  // Restore a checkpoint
+  ipcMain.handle(IPC_CHANNELS.CANVAS_CHECKPOINT_RESTORE, async (_, data: {
+    sessionId: string;
+    checkpointId: string;
+  }): Promise<{ id: string; label: string }> => {
+    const cp = await manager.restoreCheckpoint(data.sessionId, data.checkpointId);
+    return { id: cp.id, label: cp.label };
+  });
+
+  // Delete a checkpoint
+  ipcMain.handle(IPC_CHANNELS.CANVAS_CHECKPOINT_DELETE, async (_, data: {
+    sessionId: string;
+    checkpointId: string;
+  }): Promise<{ success: boolean }> => {
+    const removed = manager.deleteCheckpoint(data.sessionId, data.checkpointId);
+    return { success: removed };
+  });
+
+  // Get canvas session content (all files)
+  ipcMain.handle(IPC_CHANNELS.CANVAS_GET_CONTENT, async (_, sessionId: string): Promise<Record<string, string>> => {
+    return manager.getSessionContent(sessionId);
   });
 
   // Handle A2UI action from canvas window (internal IPC from canvas preload)

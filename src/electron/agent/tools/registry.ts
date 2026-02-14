@@ -1085,6 +1085,9 @@ ${skillDescriptions}`;
     if (name === 'canvas_eval') return await this.canvasTools.evalScript(input.session_id, input.script);
     if (name === 'canvas_snapshot') return await this.canvasTools.takeSnapshot(input.session_id);
     if (name === 'canvas_list') return this.canvasTools.listSessions();
+    if (name === 'canvas_checkpoint') return await this.canvasTools.saveCheckpoint(input.session_id, input.label);
+    if (name === 'canvas_restore') return await this.canvasTools.restoreCheckpoint(input.session_id, input.checkpoint_id);
+    if (name === 'canvas_checkpoints') return this.canvasTools.listCheckpoints(input.session_id);
 
     // Visual annotator tools
     if (name === 'visual_open_annotator') return await this.visualTools.openImageAnnotator(input);
@@ -1260,8 +1263,19 @@ ${skillDescriptions}`;
       // Format MCP result and process any generated files
       return await this.formatMCPResult(result, mcpToolName, input);
     } catch (error: any) {
+      const message = String(error?.message || '');
+      if (/access denied\s*-\s*path outside allowed directories/i.test(message)) {
+        return {
+          success: false,
+          error:
+            `MCP tool '${mcpToolName}' cannot access that path from its configured roots. ` +
+            'Use workspace file tools (list_directory/read_file/write_file) for this workspace, or run in an allowed directory.',
+          source: 'mcp',
+          tool: mcpToolName,
+        };
+      }
       // Tool was registered but execution failed - propagate the error with context
-      throw new Error(`MCP tool '${mcpToolName}' failed: ${error.message}`);
+      throw new Error(`MCP tool '${mcpToolName}' failed: ${message}`);
     }
   }
 

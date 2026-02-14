@@ -230,6 +230,17 @@ export const Events = {
   HEARTBEAT: 'heartbeat',
   CONFIG_CHANGED: 'config.changed',
   SHUTDOWN: 'shutdown',
+
+  // ACP (Agent Client Protocol) events
+  ACP_AGENT_REGISTERED: 'acp.agent.registered',
+  ACP_AGENT_UNREGISTERED: 'acp.agent.unregistered',
+  ACP_AGENT_STATUS_CHANGED: 'acp.agent.status_changed',
+  ACP_MESSAGE_RECEIVED: 'acp.message.received',
+  ACP_TASK_UPDATED: 'acp.task.updated',
+
+  // Canvas events (cross-device)
+  CANVAS_CONTENT_PUSHED: 'canvas.content_pushed',
+  CANVAS_SESSION_UPDATED: 'canvas.session_updated',
 } as const;
 
 /**
@@ -283,4 +294,28 @@ export const Methods = {
   CHANNEL_ENABLE: 'channel.enable',
   CHANNEL_DISABLE: 'channel.disable',
   CHANNEL_REMOVE: 'channel.remove',
+
+  // ACP (Agent Client Protocol) operations
+  ACP_DISCOVER: 'acp.discover',
+  ACP_AGENT_GET: 'acp.agent.get',
+  ACP_AGENT_REGISTER: 'acp.agent.register',
+  ACP_AGENT_UNREGISTER: 'acp.agent.unregister',
+  ACP_MESSAGE_SEND: 'acp.message.send',
+  ACP_MESSAGE_LIST: 'acp.message.list',
+  ACP_TASK_CREATE: 'acp.task.create',
+  ACP_TASK_GET: 'acp.task.get',
+  ACP_TASK_LIST: 'acp.task.list',
+  ACP_TASK_CANCEL: 'acp.task.cancel',
+
+  // Canvas operations (cross-device rendering)
+  CANVAS_LIST: 'canvas.list',
+  CANVAS_GET: 'canvas.get',
+  CANVAS_SNAPSHOT: 'canvas.snapshot',
+  CANVAS_CONTENT: 'canvas.content',
+  CANVAS_PUSH: 'canvas.push',
+  CANVAS_EVAL: 'canvas.eval',
+  CANVAS_CHECKPOINT_SAVE: 'canvas.checkpoint.save',
+  CANVAS_CHECKPOINT_LIST: 'canvas.checkpoint.list',
+  CANVAS_CHECKPOINT_RESTORE: 'canvas.checkpoint.restore',
+  CANVAS_CHECKPOINT_DELETE: 'canvas.checkpoint.delete',
 } as const;

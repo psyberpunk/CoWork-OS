@@ -7,7 +7,10 @@ describe('TaskExecutor workspace preflight acknowledgement', () => {
     shouldPauseForQuestions: true,
     workspacePreflightAcknowledged: false,
     capabilityUpgradeRequested: false,
+    requiresExecutionToolRun: false,
+    allowExecutionWithoutShell: false,
     isInternalAppOrToolChangeIntent: vi.fn(() => false),
+    preflightShellExecutionCheck: vi.fn(() => false),
     tryAutoSwitchToPreferredWorkspaceForAmbiguousTask: vi.fn(() => false),
     task: { prompt: 'Fix a bug in src/app.ts', id: 't1' },
     classifyWorkspaceNeed: vi.fn(() => 'needs_existing'),
@@ -83,6 +86,39 @@ describe('TaskExecutor workspace preflight acknowledgement', () => {
     };
 
     const shouldPause = (TaskExecutor as any).prototype.preflightWorkspaceCheck.call(fakeThis);
+    expect(shouldPause).toBe(false);
+    expect(pauseForUserInput).not.toHaveBeenCalled();
+  });
+
+  it('pauses for shell enablement when task requires command execution and shell is disabled', () => {
+    const pauseForUserInput = vi.fn();
+    const fakeThis: any = {
+      ...buildBase(),
+      workspace: { isTemp: false, id: 'ws1', permissions: { shell: false } },
+      requiresExecutionToolRun: true,
+      allowExecutionWithoutShell: false,
+      lastPauseReason: null,
+      pauseForUserInput,
+    };
+
+    const shouldPause = (TaskExecutor as any).prototype.preflightShellExecutionCheck.call(fakeThis);
+    expect(shouldPause).toBe(true);
+    expect(pauseForUserInput).toHaveBeenCalledTimes(1);
+    expect(pauseForUserInput.mock.calls[0][1]).toBe('shell_permission_required');
+  });
+
+  it('does not pause for shell when user explicitly chose to continue without shell', () => {
+    const pauseForUserInput = vi.fn();
+    const fakeThis: any = {
+      ...buildBase(),
+      workspace: { isTemp: false, id: 'ws1', permissions: { shell: false } },
+      requiresExecutionToolRun: true,
+      allowExecutionWithoutShell: true,
+      lastPauseReason: null,
+      pauseForUserInput,
+    };
+
+    const shouldPause = (TaskExecutor as any).prototype.preflightShellExecutionCheck.call(fakeThis);
     expect(shouldPause).toBe(false);
     expect(pauseForUserInput).not.toHaveBeenCalled();
   });

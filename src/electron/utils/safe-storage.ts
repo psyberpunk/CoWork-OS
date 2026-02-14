@@ -15,6 +15,11 @@ export type SafeStorageLike = {
 };
 
 export function getSafeStorage(): SafeStorageLike | null {
+  const keychainDisabled = (process.env.COWORK_DISABLE_OS_KEYCHAIN || '').trim().toLowerCase();
+  if (keychainDisabled === '1' || keychainDisabled === 'true' || keychainDisabled === 'yes') {
+    return null;
+  }
+
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const electron = require('electron') as any;
@@ -30,4 +35,3 @@ export function getSafeStorage(): SafeStorageLike | null {
     return null;
   }
 }
-

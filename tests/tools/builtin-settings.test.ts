@@ -87,6 +87,9 @@ describe('BuiltinToolsSettingsManager', () => {
           image: { enabled: true, priority: 'normal' },
         },
         toolOverrides: {},
+        toolTimeouts: {},
+        toolAutoApprove: {},
+        runCommandApprovalMode: 'per_command',
         version: '1.0.0',
       };
 
@@ -111,6 +114,8 @@ describe('BuiltinToolsSettingsManager', () => {
           shell: { enabled: true, priority: 'normal' as const },
         },
         toolOverrides: {},
+        toolTimeouts: {},
+        toolAutoApprove: {},
         version: '1.0.0',
       };
 
@@ -121,6 +126,7 @@ describe('BuiltinToolsSettingsManager', () => {
       // Should have merged the image category from defaults
       expect(settings.categories.image).toBeDefined();
       expect(settings.categories.image.enabled).toBe(true);
+      expect(settings.runCommandApprovalMode).toBe('per_command');
     });
 
     it('should cache settings after first load', () => {
@@ -432,6 +438,11 @@ describe('BuiltinToolsSettingsManager', () => {
       expect(defaults.categories.image.enabled).toBe(true);
     });
 
+    it('should use per-command shell approval mode by default', () => {
+      const defaults = BuiltinToolsSettingsManager.getDefaultSettings();
+      expect(defaults.runCommandApprovalMode).toBe('per_command');
+    });
+
     it('should have all categories at normal priority by default', () => {
       const defaults = BuiltinToolsSettingsManager.getDefaultSettings();
 
@@ -448,6 +459,26 @@ describe('BuiltinToolsSettingsManager', () => {
       const defaults = BuiltinToolsSettingsManager.getDefaultSettings();
 
       expect(defaults.toolOverrides).toEqual({});
+    });
+  });
+
+  describe('getRunCommandApprovalMode', () => {
+    it('returns single_bundle when configured', () => {
+      const settings = BuiltinToolsSettingsManager.getDefaultSettings();
+      settings.runCommandApprovalMode = 'single_bundle';
+      mockStoredSettings = settings;
+      BuiltinToolsSettingsManager.clearCache();
+
+      expect(BuiltinToolsSettingsManager.getRunCommandApprovalMode()).toBe('single_bundle');
+    });
+
+    it('falls back to per_command for unknown values', () => {
+      const settings = BuiltinToolsSettingsManager.getDefaultSettings() as any;
+      settings.runCommandApprovalMode = 'unexpected_mode';
+      mockStoredSettings = settings;
+      BuiltinToolsSettingsManager.clearCache();
+
+      expect(BuiltinToolsSettingsManager.getRunCommandApprovalMode()).toBe('per_command');
     });
   });
 });

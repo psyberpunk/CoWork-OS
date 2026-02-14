@@ -70,6 +70,21 @@ export interface EvaluateResult {
   result: any;
 }
 
+function normalizeEvaluateScript(script: string): string {
+  const trimmed = String(script || '').trim();
+  if (!trimmed) return '';
+
+  // LLMs frequently send multi-line snippets with top-level "return".
+  if (/(?:^|[\n;])\s*return\b/.test(trimmed)) {
+    if (/\bawait\b/.test(trimmed)) {
+      return `(async () => {\n${trimmed}\n})()`;
+    }
+    return `(() => {\n${trimmed}\n})()`;
+  }
+
+  return trimmed;
+}
+
 /**
  * BrowserService provides browser automation capabilities using Playwright
  */
@@ -618,10 +633,12 @@ export class BrowserService {
   async evaluate(script: string): Promise<EvaluateResult> {
     await this.ensurePage();
 
+    const normalizedScript = normalizeEvaluateScript(script);
+
     try {
       const result = await this.page!.evaluate((code) => {
-        return eval(code);
-      }, script);
+        return (0, eval)(code);
+      }, normalizedScript);
 
       return { success: true, result };
     } catch (error) {
@@ -798,3 +815,7 @@ export class BrowserService {
     }
   }
 }
+
+export const _testUtils = {
+  normalizeEvaluateScript,
+};

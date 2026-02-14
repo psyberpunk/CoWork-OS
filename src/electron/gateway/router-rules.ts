@@ -16,7 +16,8 @@ export type RouterRuleResult =
   | { action: 'ignore'; reason?: string }
   | { action: 'reply'; text: string; parseMode?: 'markdown' }
   | { action: 'rewrite'; text: string }
-  | { action: 'set_workspace'; workspaceId: string; text?: string };
+  | { action: 'set_workspace'; workspaceId: string; text?: string }
+  | { action: 'set_agent'; agentRoleId: string; workspaceId?: string; text?: string };
 
 const ROUTER_DEFAULT_LIMITS: MontyResourceLimits = {
   maxDurationSecs: 0.25,
@@ -73,6 +74,13 @@ function normalizeRuleResult(raw: unknown): RouterRuleResult | null {
     if (!workspaceId) return null;
     const text = typeof obj.text === 'string' ? obj.text : undefined;
     return { action: 'set_workspace', workspaceId, ...(text ? { text } : {}) };
+  }
+  if (action === 'set_agent') {
+    const agentRoleId = typeof obj.agentRoleId === 'string' ? obj.agentRoleId.trim() : '';
+    if (!agentRoleId) return null;
+    const workspaceId = typeof obj.workspaceId === 'string' ? obj.workspaceId.trim() : undefined;
+    const text = typeof obj.text === 'string' ? obj.text : undefined;
+    return { action: 'set_agent', agentRoleId, ...(workspaceId ? { workspaceId } : {}), ...(text ? { text } : {}) };
   }
 
   return null;

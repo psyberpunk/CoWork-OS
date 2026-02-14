@@ -4964,11 +4964,12 @@ function setupMemoryHandlers(): void {
     }
   });
 
-  // Discover extensions (re-scan directories)
+  // Discover extensions (re-scan directories for new plugins)
   ipcMain.handle(IPC_CHANNELS.EXTENSIONS_DISCOVER, async () => {
     try {
       const registry = getPluginRegistry();
-      await registry.initialize();
+      await registry.initialize(); // no-op if already initialized at startup
+      await registry.discoverNewPlugins(); // scan for newly-added plugins
       const plugins = registry.getPlugins();
       return plugins.map((p: any) => ({
         name: p.manifest.name,
