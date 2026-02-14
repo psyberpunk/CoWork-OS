@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.84] - 2026-02-14
+
+### Fixed
+- **Release smoke-test module resolution**: installability validation now runs Electron with `cwd` set to the installed `cowork-os` package directory so `require('better-sqlite3')` resolves correctly after setup.
+- **Release continuity**: keeps the 0.3.82 npm SIGKILL regression fix while restoring end-to-end GitHub release packaging path after CI validation.
+
 ## [0.3.83] - 2026-02-14
 
 ### Fixed
@@ -572,6 +578,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.3.84 | 2026-02-14 | Fixes CI installability check module resolution so release validation passes and desktop packaging can continue |
 | 0.3.83 | 2026-02-14 | Fixes release workflow shell parsing so installability validation and desktop asset publishing complete successfully |
 | 0.3.82 | 2026-02-14 | Removes script-enabled recovery installs that triggered electron-winstaller SIGKILL and hardens runtime repair install flags |
 | 0.3.81 | 2026-02-14 | Restored reliable /tmp install flow with retry-safe native setup and CI validation for both registry and npm-pack install paths |
@@ -592,7 +599,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | 0.1.0 | 2025-01-24 | First public release with core features |
 | 0.0.1 | 2025-01-20 | Initial development setup |
 
-[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.83...HEAD
+[Unreleased]: https://github.com/CoWork-OS/CoWork-OS/compare/v0.3.84...HEAD
+[0.3.84]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.84
 [0.3.83]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.83
 [0.3.82]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.82
 [0.3.81]: https://github.com/CoWork-OS/CoWork-OS/releases/tag/v0.3.81
